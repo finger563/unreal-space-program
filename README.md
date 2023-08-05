@@ -9,6 +9,8 @@ Tutorial](https://dev.epicgames.com/community/learning/tutorials/mmL/a-diy-fligh
 
 <img width="1698" alt="CleanShot 2023-08-05 at 13 36 31@2x" src="https://github.com/finger563/unreal-space-program/assets/213467/4aa77996-68f2-4dc5-b006-e60c10b8af6f">
 
+<img width="1690" alt="CleanShot 2023-08-05 at 13 38 18@2x" src="https://github.com/finger563/unreal-space-program/assets/213467/b8f5e1bf-faa2-447d-bb7e-b7e31d16e64d">
+
 
 ## Information
 
