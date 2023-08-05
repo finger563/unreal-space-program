@@ -7,6 +7,9 @@ simulation. A useful reference I followed when extending this project is the
 original post by Epic Games: [A DIY Flight Simulator
 Tutorial](https://dev.epicgames.com/community/learning/tutorials/mmL/a-diy-flight-simulator-tutorial).
 
+<img width="1698" alt="CleanShot 2023-08-05 at 13 36 31@2x" src="https://github.com/finger563/unreal-space-program/assets/213467/4aa77996-68f2-4dc5-b006-e60c10b8af6f">
+
+
 ## Information
 
 This project has been tested on MacOS and is currently under heavy development.
