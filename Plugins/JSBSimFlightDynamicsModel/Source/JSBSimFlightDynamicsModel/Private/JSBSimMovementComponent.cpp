@@ -27,6 +27,7 @@
 #include "models/FGMassBalance.h"
 #include "models/propulsion/FGThruster.h"
 #include "models/propulsion/FGPiston.h"
+#include "models/propulsion/FGRocket.h"
 #include "models/propulsion/FGTurbine.h"
 #include "models/propulsion/FGTurboProp.h"
 #include "models/propulsion/FGTank.h"
@@ -951,7 +952,7 @@ void UJSBSimMovementComponent::ApplyEnginesCommands()
 		case JSBSim::FGEngine::etRocket:
 		{
 			// FGRocket code block
-			// FGRocket* RocketEngine = (FGRocket*)Propulsion->GetEngine(i);
+			std::shared_ptr < JSBSim::FGRocket> RocketEngine = std::static_pointer_cast<JSBSim::FGRocket>(Propulsion->GetEngine(i));
 			break;
 		}
 		case JSBSim::FGEngine::etTurboprop:
@@ -1010,9 +1011,8 @@ void UJSBSimMovementComponent::GetEnginesStates()
 		}
 		case JSBSim::FGEngine::etRocket:
 		{
-			// TODO
 			// FGRocket code block
-			// FGRocket* RocketEngine = (FGRocket*)Propulsion->GetEngine(i);
+			std::shared_ptr < JSBSim::FGRocket> RocketEngine = std::static_pointer_cast<JSBSim::FGRocket>(Engine);
 			break;
 		}
 		case JSBSim::FGEngine::etTurboprop:
