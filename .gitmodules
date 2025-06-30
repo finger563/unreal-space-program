@@ -1,0 +1,3 @@
+[submodule "Plugins/cesium-unreal"]
+	path = Plugins/cesium-unreal
+	url = git@github.com:cesiumgs/cesium-unreal

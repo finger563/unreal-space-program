@@ -11,6 +11,20 @@ Tutorial](https://dev.epicgames.com/community/learning/tutorials/mmL/a-diy-fligh
 
 <img width="1690" alt="CleanShot 2023-08-05 at 13 38 18@2x" src="https://github.com/finger563/unreal-space-program/assets/213467/b8f5e1bf-faa2-447d-bb7e-b7e31d16e64d">
 
+<!-- markdown-toc start - Don't edit this section. Run M-x markdown-toc-refresh-toc -->
+**Table of Contents**
+
+- [Unreal Space Program](#unreal-space-program)
+  - [Information](#information)
+  - [Learning more about Unreal Engine](#learning-more-about-unreal-engine)
+  - [Key Mappings](#key-mappings)
+    - [Flight Commands](#flight-commands)
+    - [Application](#application)
+    - [Environment](#environment)
+  - [Developing](#developing)
+    - [Setting up Cesium Plugin](#setting-up-cesium-plugin)
+
+<!-- markdown-toc end -->
 
 ## Information
 
@@ -81,3 +95,40 @@ Gamepad Layout
 |Time of day - Dawn Preset| INSERT|
 |Time of day - Noon Preset| HOME|
 |Time of day - Dusk Preset| PAGE UP|
+
+## Developing
+
+Make sure when you clone, you clone recursively, or after cloning, make sure you run:
+
+```console
+git submodule update --init --recursive
+```
+
+### Setting up Cesium Plugin
+
+You'll need to ensure that the native libraries for cesium are built for your processor:
+
+```console
+cd Plugins/cesium-unreal/extern
+
+# if you want to build debug
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DUNREAL_ENGINE_ROOT=/Users/Shared/Epic\ Games/UE_5.6
+
+# if you want to build release
+cmake -B build -S . -DCMAKE_BUILD_TYPE=RelWithDebInfo -DUNREAL_ENGINE_ROOT=/Users/Shared/Epic\ Games/UE_5.6
+
+# now actually build it
+cmake --build build --target install --parallel 14
+```
+
+Afterwards, you'll need to make sure the libraries are available:
+
+```console
+cd Plugins/cesium-unreal/Source/ThirdParty/lib
+
+# if you built debug above
+ln -s ./Darwin-arm64-Debug Darwin-universal-Debug
+
+# if you built release above
+ln -s ./Darwin-arm64-Release Darwin-universal-Release
+```
