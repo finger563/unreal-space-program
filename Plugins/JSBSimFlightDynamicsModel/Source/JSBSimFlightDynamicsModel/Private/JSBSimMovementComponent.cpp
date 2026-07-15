@@ -95,7 +95,7 @@ void UJSBSimMovementComponent::PropertyManagerNode(TArray<FString>& Catalog)
 //TODO, check if this is optimized, as we are using strings for convenience and we could probably cache the propertynode once we have it
 void UJSBSimMovementComponent::CommandConsole(FString Property, FString InValue, FString& OutValue)
 {
-  FGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*Property),false);
+  SGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*Property), false);
   if (node != NULL)
   {    
     //we skip setting values by using blank InValue.
@@ -120,7 +120,7 @@ void UJSBSimMovementComponent::CommandConsoleBatch(TArray<FString> Property, TAr
   OutValue.SetNum(Property.Num());
   for (int i = 0; i < Property.Num(); i++)
   {
-    FGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*(Property[i])),false);
+    SGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*(Property[i])), false);
     if (node != NULL)
     {
       //we skip setting values by using blank InValue.

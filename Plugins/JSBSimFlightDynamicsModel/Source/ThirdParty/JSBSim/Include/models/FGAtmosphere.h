@@ -236,6 +236,13 @@ protected:
   double Viscosity = 0.0;
   double KinematicViscosity = 0.0;
 
+  // Nodes for atmospheric properties overridding
+  SGPropertyNode_ptr atmosphere_node;
+  SGPropertyNode_ptr override_node;
+  SGPropertyNode_ptr override_temperature_node;
+  SGPropertyNode_ptr override_pressure_node;
+  SGPropertyNode_ptr override_density_node;
+
   /// Calculate the atmosphere for the given altitude.
   virtual void Calculate(double altitude);
 
@@ -268,12 +275,12 @@ protected:
   /// Check that the pressure is within plausible boundaries.
   /// @param msg Message to display if the pressure is out of boundaries
   /// @param quiet Don't display the message if set to true
-  double ValidatePressure(double p, const string& msg, bool quiet=false) const;
+  double ValidatePressure(double p, const std::string& msg, bool quiet=false) const;
 
   /// Check that the temperature is within plausible boundaries.
   /// @param msg Message to display if the pressure is out of boundaries
   /// @param quiet Don't display the message if set to true
-  double ValidateTemperature(double t, const string& msg, bool quiet=false) const;
+  double ValidateTemperature(double t, const std::string& msg, bool quiet=false) const;
 
   /// @name ISA constants
   //@{

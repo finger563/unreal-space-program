@@ -120,7 +120,7 @@ public:
   /** Set the list of properties that should be output for this output instance.
       @param outputProperties list of properties that should be output
   */
-  void SetOutputProperties(std::vector<FGPropertyNode_ptr> & outputProperties);
+  void SetOutputProperties(std::vector<SGPropertyNode_ptr> & outputProperties);
 
   /** Overwrites the name identifier under which the output will be logged.
       This method is taken into account if it is called before
@@ -142,12 +142,14 @@ public:
   bool InitModel(void) override;
 
   /** Executes the output directives (implement the FGModel interface).
-      This method checks that the current time step matches the output
-      rate and calls the registered "pre" functions, the output
-      generation and finally the "post" functions.
+      This method checks that the current time step matches the output rate and
+      calls the registered "pre" functions, the output generation and finally
+      the "post" functions.
+      @param Holding if true, the executive has been directed to hold the sim
+                     from advancing time.
       @result false if no error.
    */
-  bool Run(void);
+  bool Run(bool Holding) override;
 
   /** Generate the output. This is a pure method so it must be implemented by
       the classes that inherits from FGOutputType. The Print name may not be
