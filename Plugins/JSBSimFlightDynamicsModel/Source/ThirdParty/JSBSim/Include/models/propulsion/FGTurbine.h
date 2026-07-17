@@ -183,7 +183,7 @@ public:
 
   void Calculate(void);
   double CalcFuelNeed(void);
-  double GetPowerAvailable(void);
+  double GetPowerAvailable(void) const;
   /** A lag filter.
       Used to control the rate at which values are allowed to change.
       @param var a pointer to a variable of type double
@@ -328,7 +328,7 @@ class FGSpoolUp : public FGParameter
 public:
   FGSpoolUp(FGTurbine* _turb, double BPR, double factor)
     : turb(_turb), delay(factor * 90.0 / (BPR + 3.0)) {}
-  string GetName(void) const { return string(); };
+  std::string GetName(void) const { return std::string(); };
   double GetValue(void) const {
     // adjust acceleration for N2 and atmospheric density
     double n = std::min(1.0, turb->N2norm + 0.1);
@@ -345,7 +345,7 @@ public:
   FGSimplifiedTSFC(FGTurbine* _turb, double tsfcVal)
     : turb(_turb), tsfc(tsfcVal) {}
 
-  string GetName(void) const { return string(); }
+  std::string GetName(void) const { return std::string(); }
 
   double GetValue(void) const {
     // Correction/denormalisation for temp and thrust

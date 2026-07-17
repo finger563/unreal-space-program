@@ -95,7 +95,7 @@ void UJSBSimMovementComponent::PropertyManagerNode(TArray<FString>& Catalog)
 //TODO, check if this is optimized, as we are using strings for convenience and we could probably cache the propertynode once we have it
 void UJSBSimMovementComponent::CommandConsole(FString Property, FString InValue, FString& OutValue)
 {
-  FGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*Property),false);
+  SGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*Property), false);
   if (node != NULL)
   {    
     //we skip setting values by using blank InValue.
@@ -120,7 +120,7 @@ void UJSBSimMovementComponent::CommandConsoleBatch(TArray<FString> Property, TAr
   OutValue.SetNum(Property.Num());
   for (int i = 0; i < Property.Num(); i++)
   {
-    FGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*(Property[i])),false);
+    SGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*(Property[i])), false);
     if (node != NULL)
     {
       //we skip setting values by using blank InValue.
@@ -232,8 +232,17 @@ double UJSBSimMovementComponent::GetAGLevel(const FVector& StartECEFLocation, FV
   }
   else
   {
-    ECEFContactPoint = FVector();
-    ECEFNormal = FVector::ZAxisVector;
+    // Raycast failed (no collision under the query point - e.g. terrain tiles not loaded or
+    // physics meshes disabled). Fall back to the sea-level ellipsoid as the ground, like
+    // JSBSim's default ground callback. Returning a zeroed contact point here would make
+    // JSBSim believe the terrain is at the center of the earth, producing garbage
+    // ground-reaction forces and letting the vehicle fall to sea level.
+    FGeographicCoordinates QueryGeographic;
+    GeoReferencingSystem->ECEFToGeographic(StartECEFLocation, QueryGeographic);
+    HAT = QueryGeographic.Altitude;
+    QueryGeographic.Altitude = 0.0;
+    GeoReferencingSystem->GeographicToECEF(QueryGeographic, ECEFContactPoint);
+    ECEFNormal = Up;
   }
   return HAT;
 }
@@ -542,7 +551,17 @@ void UJSBSimMovementComponent::PrepareJSBSim()
 			IC->SetVEastFpsIC(gndVelNED(2));
 			IC->SetVDownFpsIC(gndVelNED(3));
 		}
-		DoTrim();
+		if (bTrimOnStart)
+		{
+			DoTrim();
+		}
+		else
+		{
+			// Rockets / ballistic vehicles: no aerodynamic trim to solve. Re-run the
+			// Initial Conditions so integrators start from the exact pad state instead.
+			UE_LOG(LogJSBSim, Display, TEXT("bTrimOnStart is false - skipping trim, using Initial Conditions directly."));
+			Exec->RunIC();
+		}
 		TrimNeeded = false;
 	}
 

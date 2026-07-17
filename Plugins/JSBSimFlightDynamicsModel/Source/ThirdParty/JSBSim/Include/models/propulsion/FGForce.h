@@ -227,7 +227,7 @@ public:
   /// Destructor
   virtual ~FGForce();
 
-  enum TransformType { tNone, tWindBody, tLocalBody, tCustom };
+  enum TransformType { tNone, tWindBody, tLocalBody, tInertialBody, tCustom };
 
   virtual const FGColumnVector3& GetBodyForces(void);
 
@@ -261,9 +261,9 @@ public:
   inline void SetLocationX(double x) {vXYZn(eX) = x; vActingXYZn(eX) = x;}
   inline void SetLocationY(double y) {vXYZn(eY) = y; vActingXYZn(eY) = y;}
   inline void SetLocationZ(double z) {vXYZn(eZ) = z; vActingXYZn(eZ) = z;}
-  inline double SetActingLocationX(double x) {vActingXYZn(eX) = x; return x;}
-  inline double SetActingLocationY(double y) {vActingXYZn(eY) = y; return y;}
-  inline double SetActingLocationZ(double z) {vActingXYZn(eZ) = z; return z;}
+  inline void SetActingLocationX(double x) {vActingXYZn(eX) = x;}
+  inline void SetActingLocationY(double y) {vActingXYZn(eY) = y;}
+  inline void SetActingLocationZ(double z) {vActingXYZn(eZ) = z;}
   inline void SetLocation(const FGColumnVector3& vv) { vXYZn = vv; SetActingLocation(vv);}
   inline void SetActingLocation(const FGColumnVector3& vv) { vActingXYZn = vv; }
 

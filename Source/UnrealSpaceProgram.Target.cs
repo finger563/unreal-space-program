@@ -5,13 +5,12 @@ using System.Collections.Generic;
 
 public class UnrealSpaceProgramTarget : TargetRules
 {
-	public UnrealSpaceProgramTarget( TargetInfo Target) : base(Target)
-	{
-		Type = TargetType.Game;
-		DefaultBuildSettings = BuildSettingsVersion.V5;
-		// CppStandard = CppStandardVersion.Cpp20;
-		// IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_5;
+ 	public UnrealSpaceProgramTarget( TargetInfo Target) : base(Target)
+ 	{
+ 		Type = TargetType.Game;
+		DefaultBuildSettings = BuildSettingsVersion.V6;
+		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_7;
 
-		ExtraModuleNames.AddRange( new string[] { "UnrealSpaceProgram" } );
-	}
+ 		ExtraModuleNames.AddRange( new string[] { "UnrealSpaceProgram" } );
+ 	}
 }

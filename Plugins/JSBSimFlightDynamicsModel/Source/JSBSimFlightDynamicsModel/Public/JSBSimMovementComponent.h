@@ -108,7 +108,17 @@ public:
 	 */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Initial Conditions|Aircraft")
 	bool StartOnGround = true;
-	
+
+	/**
+	 * If true (default), JSBSim computes an initial trim on BeginPlay to find a steady state.
+	 * Trim is meaningful for aircraft, but not for vehicles like rockets that sit inert on a
+	 * launch pad (there is no aerodynamic equilibrium to solve for, and the solver can diverge
+	 * or fail). Set this to false for rockets / ballistic vehicles: the Initial Conditions from
+	 * RunIC() are used directly, with no trim.
+	*/
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Initial Conditions|Aircraft")
+	bool bTrimOnStart = true;
+
 	/**
 	 * Gear Position on play
 	*/

@@ -83,7 +83,7 @@ public:
   }
 
 private:
-  FGPropertyNode_ptr data[3];
+  SGPropertyNode_ptr data[3];
 };
 
 inline FGColumnVector3 operator*(double a, const FGPropertyVector3& v) {
@@ -111,6 +111,7 @@ CLASS DOCUMENTATION
            completes the right handed system. This is modified from a normal
            wind frame definition, which is rotated about the Y axis 180 degrees
            from this WIND frame.
+    - INERTIAL frame refers to the ECI frame.
 
     Much of the substance of this class is located in the FGForce base class,
     from which this class is derived.
@@ -122,7 +123,7 @@ CLASS DOCUMENTATION
 
       [<function> ... </function>]
 
-      <location unit="{IN | M}"> 
+      <location unit="{IN | M}">
         <x> {number} </x>
         <y> {number} </y>
         <z> {number} </z>

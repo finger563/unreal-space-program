@@ -199,7 +199,7 @@ public:
 
   /** Runs the Flight Controls model; called by the Executive
       Can pass in a value indicating if the executive is directing the simulation to Hold.
-      @param Holding if true, the executive has been directed to hold the sim from 
+      @param Holding if true, the executive has been directed to hold the sim from
                      advancing time. Some models may ignore this flag, such as the Input
                      model, which may need to be active to listen on a socket for the
                      "Resume" command to be given.
@@ -222,7 +222,7 @@ public:
 
   /** Gets the steering command.
        @return steering command in range from -1.0 - 1.0 */
-   double GetDsCmd(void) const { return fdmex->GetGroundReactions()->GetDsCmd(); }
+   double GetDsCmd(void) const { return FDMExec->GetGroundReactions()->GetDsCmd(); }
 
   /** Gets the flaps command.
       @return flaps command in range from 0 to 1.0 */
@@ -243,9 +243,13 @@ public:
 
   const std::vector<double>& GetThrottleCmd() const {return ThrottleCmd;}
 
-  /** Gets the mixture command.
-      @param engine engine ID number
-      @return mixture command in range from 0 - 1.0 for the given engine */
+/** Gets the mixture command.
+    @param engine engine ID number
+    @return mixture command for the given engine
+    @note The mixture command is generally in range from 0 - 1.0, but some
+          models might set it to a value above 1.0.
+    @note JSBSim does not check nor enforce the value to be within 0.0-1.0.
+*/
   double GetMixtureCmd(int engine) const { return MixtureCmd[engine]; }
 
   const std::vector<double>& GetMixtureCmd() const {return MixtureCmd;}
@@ -324,7 +328,11 @@ public:
 
   /** Gets the mixture position.
       @param engine engine ID number
-      @return mixture position for the given engine in range from 0 - 1.0 */
+      @return mixture position for the given engine
+      @note The mixture position is generally in range from 0 - 1.0, but some
+            models might set it to a value above 1.0.
+      @note JSBSim does not check nor enforce the value to be within 0.0-1.0.
+  */
   double GetMixturePos(int engine) const { return MixturePos[engine]; }
 
   const std::vector<double>& GetMixturePos() const {return MixturePos;}
@@ -383,7 +391,7 @@ public:
 
   /** Sets the steering command
        @param cmd steering command in percent*/
-   void SetDsCmd(double cmd) { fdmex->GetGroundReactions()->SetDsCmd( cmd ); }
+   void SetDsCmd(double cmd) { FDMExec->GetGroundReactions()->SetDsCmd( cmd ); }
 
   /** Sets the flaps command
       @param cmd flaps command in percent*/
@@ -416,7 +424,11 @@ public:
 
   /** Sets the mixture command for the specified engine
       @param engine engine ID number
-      @param cmd normalized mixture command (0.0 - 1.0)*/
+      @param cmd normalized mixture command
+      @note The mixture command is generally in range from 0 - 1.0, but some
+            models handle values above 1.0.
+      @note JSBSim does not check nor enforce the value to be within 0.0-1.0.
+  */
   void SetMixtureCmd(int engine, double cmd);
 
   /** Set the gear extend/retract command, defaults to down
@@ -471,7 +483,14 @@ public:
 
   /** Sets the actual mixture setting for the specified engine
       @param engine engine ID number
-      @param cmd normalized mixture setting (0.0 - 1.0)*/
+      @param cmd normalized mixture setting
+      @note The mixture position is typically within the range of 0 to 1.0, but
+            some models can handle values above 1.0. In the default piston
+            engine model, a mixture position of 1.0 corresponds to the full
+            power setting, and the full rich setting is reached at a value
+            higher than 1.0.
+      @note JSBSim does not check nor enforce the value to be within 0.0-1.0.
+  */
   void SetMixturePos(int engine, double cmd);
 
   /** Set the gear extend/retract position, defaults to down
@@ -531,7 +550,7 @@ public:
   double GetCBrake(void) const {return BrakePos[FGLGear::bgCenter];}
   //@}
 
-  enum SystemType { stFCS, stSystem, stAutoPilot }; 
+  enum SystemType { stFCS, stSystem, stAutoPilot };
 
   /** Loads the Flight Control System.
       Load() is called from FGFDMExec.
@@ -568,7 +587,6 @@ private:
   double TailhookPos, WingFoldPos;
   SystemType systype;
   int ChannelRate;
-  FGFDMExec* fdmex;
 
   typedef std::vector <FGFCSChannel*> Channels;
   Channels SystemChannels;
