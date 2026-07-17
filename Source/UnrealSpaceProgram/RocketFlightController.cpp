@@ -253,12 +253,31 @@ void URocketFlightController::SetMainDragArea(float AreaSqFt)
 	SetChuteAreaProperty(TEXT("external_reactions/main_chute/drag_area"), AreaSqFt);
 }
 
+void URocketFlightController::SeparateAirframe()
+{
+	if (bAirframeSeparated)
+	{
+		return;
+	}
+	// Kill the fin stability/damping moments in the FDM: a stack of tethered sections has no
+	// meaningful weathercock stability, and leaving it on makes the fins fight the parachute.
+	UJSBSimMovementComponent* Move = GetMovement();
+	if (Move)
+	{
+		FString OutValue;
+		Move->CommandConsole(TEXT("systems/fins-effective"), TEXT("0.0"), OutValue);
+	}
+	bAirframeSeparated = true;
+	UE_LOG(LogTemp, Display, TEXT("Airframe separated at %.1f ft AGL."), AltitudeAGLFt);
+}
+
 void URocketFlightController::DeployDrogue()
 {
 	if (bDrogueDeployed)
 	{
 		return;
 	}
+	SeparateAirframe();
 	SetDrogueDragArea(DrogueDragAreaSqFt);
 	bDrogueDeployed = true;
 	if (!bMainDeployed)
@@ -301,6 +320,15 @@ void URocketFlightController::ResetFlight()
 	ShutdownMotor();
 	SetDrogueDragArea(0.0f);
 	SetMainDragArea(0.0f);
+
+	// Re-attach the airframe: restore fin effectiveness in the FDM.
+	if (UJSBSimMovementComponent* Move = GetMovement())
+	{
+		FString OutValue;
+		Move->CommandConsole(TEXT("systems/fins-effective"), TEXT("1.0"), OutValue);
+	}
+	bAirframeSeparated = false;
+
 	SetPhase(ERocketFlightPhase::Prelaunch);
 }
 

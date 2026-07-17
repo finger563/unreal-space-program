@@ -224,6 +224,10 @@ void URocketUdpBridge::HandleCommandLine(const FString& Line, const TSharedRef<F
 		if (Tokens.Num() < 2) { SendString(TEXT("ERR THROTTLE needs a value 0..1\n"), Reply); }
 		else if (NeedsController()) { FC->SetThrottle(FCString::Atof(*Tokens[1])); SendString(TEXT("OK THROTTLE\n"), Reply); }
 	}
+	else if (Cmd == TEXT("SEPARATE"))
+	{
+		if (NeedsController()) { FC->SeparateAirframe(); SendString(TEXT("OK SEPARATE\n"), Reply); }
+	}
 	else if (Cmd == TEXT("DROGUE"))
 	{
 		if (NeedsController()) { FC->DeployDrogue(); SendString(TEXT("OK DROGUE\n"), Reply); }
@@ -302,12 +306,13 @@ FString URocketUdpBridge::BuildTelemetryJson()
 
 	return FString::Printf(
 		TEXT("{\"met\":%.3f,\"phase\":\"%s\",\"ignited\":%s,\"liftoff\":%s,\"apogee\":%s,")
-		TEXT("\"drogue\":%s,\"main\":%s,\"landed\":%s,")
+		TEXT("\"separated\":%s,\"drogue\":%s,\"main\":%s,\"landed\":%s,")
 		TEXT("\"agl_ft\":%.2f,\"asl_ft\":%.2f,\"vs_fps\":%.2f,\"thrust_lbf\":%.2f,")
 		TEXT("\"max_agl_ft\":%.2f,\"apogee_agl_ft\":%.2f,")
 		TEXT("\"lat\":%.7f,\"lon\":%.7f,\"yaw_deg\":%.2f,\"pitch_deg\":%.2f,\"roll_deg\":%.2f}\n"),
 		FC->MissionTimeSeconds, PhaseWireName(FC->Phase),
 		BoolJson(FC->bMotorIgnited), BoolJson(FC->bLiftedOff), BoolJson(FC->bReachedApogee),
+		BoolJson(FC->bAirframeSeparated),
 		BoolJson(FC->bDrogueDeployed), BoolJson(FC->bMainDeployed), BoolJson(FC->bLanded),
 		FC->AltitudeAGLFt, FC->AltitudeASLFt, FC->VerticalSpeedFps, FC->MotorThrustLbf,
 		FC->MaxAltitudeAGLFt, FC->ApogeeAltitudeAGLFt,

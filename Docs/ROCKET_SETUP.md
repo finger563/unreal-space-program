@@ -144,7 +144,7 @@ authored** — it just works.
 
 ## 6. Place it on the pad and fly
 
-Use the existing **`Content/Levels/StartupLevel`** — it already contains the
+Use the existing **`Content/Levels/Map_Rocket`** — it already contains the
 `GeoReferencingSystem` and Cesium tileset the JSBSim component needs. (A rocket in an empty
 level will error out with "impossible to use ... without a GeoReferencingSystem".)
 
@@ -301,6 +301,38 @@ The two are not exclusive: use the bridge for the loop and Remote Control for
 poking/tuning while it runs.
 
 ---
+
+## 8.5 Airframe separation, sections, and parachute visuals
+
+The rocket is modeled and visualized as a real dual-deploy stack:
+
+**Physics.** When the drogue deploys (or `SeparateAirframe()` is called — also the UDP
+`SEPARATE` command), the airframe "separates": the JSBSim property `systems/fins-effective`
+goes to 0, disabling the fin weathercock/damping moments (a broken, tethered stack has no
+fin stability — before this fix, the fins fought the nose-attached parachute and the body
+pendulumed hard during descent). Two new `*_damp_chute` moments, proportional to the
+deployed drag area, model riser/canopy damping so the swing settles out. `ResetFlight()`
+restores the intact airframe.
+
+**Sections.** The pawn's visual is three sections that separate during recovery:
+
+| Section | Actor X span | Component |
+|---|---|---|
+| Booster (fins + nozzle) | 0 – 110 cm | `BoosterRoot` |
+| Upper airframe | 110 – 215 cm | `UpperRoot` |
+| Nose cone | 215 – 277 cm | `NoseRoot` |
+
+Placeholders built from engine basic shapes render out of the box. At separation the
+booster slides down the (implied) shock cord below the upper airframe; at main deploy the
+nose cone pops off and dangles beside the payload bay. Drogue and main canopies appear
+above the nose and inflate on deploy. Tuning: `SeparationAnimSpeed`, `CanopyInflateSpeed`.
+
+**Custom section meshes.** `Tools/generate_rocket_glb.py` now also emits
+`rocket_booster.glb`, `rocket_upper.glb`, `rocket_nose.glb`, and `chute_canopy.glb`
+(all origin-at-aft-joint, +X toward the nose, true size). Import them and attach each as a
+static mesh under the matching `*Root` component (identity transform), then hide the
+placeholder components. Assigning a single full-body mesh to `RocketMesh` instead switches
+to single-body mode (sections hidden, no separation animation).
 
 ## 9. Physics caveats (inherited from the reference model)
 

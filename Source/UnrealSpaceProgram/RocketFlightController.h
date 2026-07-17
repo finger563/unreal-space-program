@@ -168,6 +168,12 @@ public:
 	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|State")
 	bool bReachedApogee = false;
 
+	/** True once the airframe has separated into its tethered recovery sections. Happens
+	 *  automatically with drogue deployment, or via SeparateAirframe(). While separated, the
+	 *  fin stability moments in the JSBSim model are disabled (systems/fins-effective = 0). */
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|State")
+	bool bAirframeSeparated = false;
+
 	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|State")
 	bool bDrogueDeployed = false;
 
@@ -250,7 +256,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Rocket|Commands")
 	void SetThrottle(float Throttle01);
 
-	/** Deploy the drogue chute now (applies DrogueDragAreaSqFt). */
+	/** Separate the airframe into its tethered recovery sections. Disables the fin stability
+	 *  moments in the FDM (the broken stack no longer weathercocks). Called automatically by
+	 *  DeployDrogue; exposed separately for HIL / manual sequencing. Idempotent. */
+	UFUNCTION(BlueprintCallable, Category = "Rocket|Commands")
+	void SeparateAirframe();
+
+	/** Deploy the drogue chute now (applies DrogueDragAreaSqFt). Separates the airframe first. */
 	UFUNCTION(BlueprintCallable, Category = "Rocket|Commands")
 	void DeployDrogue();
 
