@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+
+<!--
+  File:     cesaroni_l1720_engine.xml
+  Description: Cesaroni L1720 solid rocket motor - Real Performance Data
+  
+  Specifications (from manufacturer data):
+  - Total impulse: 3660 Ns (822 lbf⋅s)  
+  - Burn time: 2.1 seconds 
+  - Peak thrust: 1946 N (437.4 lbf)
+  - Profile: Regressive curve (peak, dip, buildup, decline)
+  - Propellant mass: 1755 g (3.87 lbs, using 3.9 lbs in sim)
+  - ISP: ~220 seconds
+  - Real thrust curve data from manufacturer graph
+-->
+
+<rocket_engine name="cesaroni_l1720_engine">
+    <isp>220.0</isp>
+    <builduptime>0.1</builduptime>
+    <variation>
+        <thrust>0.02</thrust>
+        <total_isp>0.00</total_isp>
+    </variation>
+    <thrust_table name="propulsion/thrust_prop_remain" type="internal">
+      <tableData>
+           0.000   438.4   <!-- 0.0s: Peak thrust 1950N from graph -->
+           0.186   359.7   <!-- 0.1s: Quick dip to 1600N -->
+           0.371   393.4   <!-- 0.2s: Building back up 1750N -->
+           0.557   404.6   <!-- 0.3s: Continued rise 1800N -->
+           0.743   415.9   <!-- 0.4s: Rising to 1850N -->
+           0.929   415.9   <!-- 0.5s: Sustaining 1850N -->
+           1.114   422.6   <!-- 0.6s: Peak region 1880N -->
+           1.300   427.1   <!-- 0.7s: Peak region 1900N -->
+           1.486   431.6   <!-- 0.8s: Peak region 1920N -->
+           1.671   436.1   <!-- 0.9s: Peak region 1940N -->
+           1.857   438.4   <!-- 1.0s: Peak again 1950N -->
+           2.043   433.9   <!-- 1.1s: Begin decline 1930N -->
+           2.229   427.1   <!-- 1.2s: Declining 1900N -->
+           2.414   420.4   <!-- 1.3s: Declining 1870N -->
+           2.600   409.1   <!-- 1.4s: Declining 1820N -->
+           2.786   400.1   <!-- 1.5s: Declining 1780N -->
+           2.971   391.1   <!-- 1.6s: Declining 1740N -->
+           3.157   382.2   <!-- 1.7s: Declining 1700N -->
+           3.343   377.7   <!-- 1.8s: Lower 1680N -->
+           3.529   386.7   <!-- 1.9s: Slight uptick 1720N -->
+           3.714   393.4   <!-- 2.0s: Final rise 1750N -->
+           3.900     0.0   <!-- 2.1s: Sharp cutoff -->
+           4.000     0.0   <!-- Safety margin -->
+           5.000     0.0   <!-- Extended safety -->
+      </tableData>
+    </thrust_table>
+</rocket_engine> 

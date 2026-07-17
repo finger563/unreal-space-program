@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+
+<!--
+    File: l1720_nozzle.xml
+    Description: Nozzle for Cesaroni L1720 motor
+    
+    Typical 38mm motor nozzle exit diameter: ~20mm (0.79")
+    Nozzle exit area = Pi * (0.79/2)^2 / 144 = 0.00339 ft2
+-->
+
+<nozzle name="l1720_nozzle">
+  <pe unit="PSF"> 0.000110557 </pe>  <!-- Sea level atmospheric pressure -->
+  <area unit="FT2"> 0.00339 </area>  <!-- Nozzle exit area for 38mm motor -->
+</nozzle> 

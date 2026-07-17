@@ -1,0 +1,630 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="http://jsbsim.sourceforge.net/JSBSim.xsl"?>
+
+<!--
+  rocket.xml  (Unreal Space Program adaptation)
+
+  Ported from jsbsim-rocket-test, with the following deliberate fixes over the
+  reference model (which was known to be "not necessarily ideal / correct"):
+
+    1. GROUND REACTIONS - replaced the single, near-zero-stiffness contact with a
+       3-point tripod of STRUCTURE contacts at the tail (spring/damping sized for
+       the 47 lb vehicle at the 120 Hz sim rate), so the rocket can rest on the
+       pad during the countdown and survive a parachute touchdown.
+
+    2. YAW STABILITY SIGN - the reference set Cn_beta = -1.0 ("restoring"), but in
+       JSBSim body axes a restoring yaw moment is POSITIVE (opposite convention to
+       pitch). The reference rocket was aerodynamically unstable in yaw and
+       tumbled violently right after burnout. Fixed to +1.0.
+
+    3. ATTITUDE DAMPING - the reference damping terms multiplied by aero/ci2vel /
+       aero/bi2vel (= cbar/2V and span/2V), which are ALWAYS ZERO here because the
+       metrics declare chord = 0 and span = 0. Rewritten in explicit qbar/V form,
+       so pitch/yaw/roll oscillations actually damp out.
+
+    4. MASS PROPERTIES - removed the 3.9 lb "Motor" pointmass that double-counted
+       the propellant already in the tank (wet mass is now the spec's 46.9 lb, not
+       50.8), and corrected iyy/izz from 1.8 to ~9 slug-ft2 (rod approximation for
+       a 43 lb, 9.08 ft body) and ixx to 0.04.
+
+  Engine thrust curve, nozzle, FCS systems, drag model and the parachute
+  external_reactions are unchanged from the reference.
+
+  NOTE: the plugin's LoadAircraft() requires at least one ground-reaction unit or
+  its trim routine would crash, so do not remove the contacts.
+-->
+
+<fdm_config name="rocket" version="2.0" release="ALPHA"
+   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+   xsi:noNamespaceSchemaLocation="http://jsbsim.sourceforge.net/JSBSim.xsd">
+
+ <fileheader>
+  <author> AeromatiC++ version 3.3.21 (adapted for Unreal Space Program) </author>
+  <filecreationdate> 16 May 2025 </filecreationdate>
+  <version>$Revision: 1.80 $</version>
+  <description> Models a small suborbital amateur rocket (Cesaroni L1720). </description>
+ </fileheader>
+
+ <metrics>
+   <wingarea  unit="FT2"> 0.196     </wingarea>  <!-- Pi * (0.25)^2 for 6" diameter rocket body -->
+   <wingspan  unit="FT" > 0.0      </wingspan>   <!-- No wings on rocket -->
+   <wing_incidence unit="DEG"> 0.00 </wing_incidence>
+   <chord     unit="FT" > 0.0      </chord>      <!-- No wing chord -->
+   <htailarea unit="FT2"> 0.0      </htailarea>  <!-- No horizontal tail -->
+   <htailarm  unit="FT" > 0.0      </htailarm>   <!-- No tail arm -->
+   <vtailarea  unit="FT2">0.08     </vtailarea>  <!-- Total fin area: 4 fins x 0.02 ft2 each -->
+   <vtailarm  unit="FT" > 3.34     </vtailarm>   <!-- Fin arm: 95" - 54.9" = 40.1" = 3.34 ft -->
+   <location name="AERORP" unit="FT">  <!-- Center of Pressure at 68.1" from diagram -->
+     <x> 5.675     </x>  <!-- 68.1" = 5.675 ft from nose -->
+     <y> 0.00     </y>
+     <z> 0.00     </z>
+   </location>
+   <location name="EYEPOINT" unit="FT">
+     <x> 1.17     </x>
+     <y> -1.50    </y>
+     <z> 3.75     </z>
+   </location>
+   <location name="VRP" unit="FT">
+     <x>     0.0 </x>
+     <y>     0.0 </y>
+     <z>     0.0 </z>
+   </location>
+ </metrics>
+
+ <mass_balance>
+   <!-- Inertias corrected from the reference model (which used iyy=izz=1.8): a 43 lb,
+        9.08 ft body gives Iyy ~ m*L^2/12 ~ 9 slug-ft2. The reference's low value made
+        every attitude oscillation ~2x faster and tumbles far more violent. -->
+   <ixx unit="SLUG*FT2">  0.04    </ixx>  <!-- Roll inertia: solid cylinder m*r^2/2, r=0.25 ft -->
+   <iyy unit="SLUG*FT2">  9.0     </iyy>  <!-- Pitch inertia for 109" / 43 lb rocket -->
+   <izz unit="SLUG*FT2">  9.0     </izz>  <!-- Yaw inertia for 109" / 43 lb rocket -->
+   <emptywt unit="LBS" >  43.0 </emptywt>
+   <location name="CG" unit="FT">  <!-- Empty CG at 54.9" from nose -->
+     <x> 4.575     </x>
+     <y> 0.00     </y>
+     <z> 0.00     </z>
+   </location>
+   <!-- NOTE: the reference model also had a 3.9 lb "Motor" pointmass here, which
+        double-counted the propellant already in the fuel tank below (wet mass came out
+        50.8 lb instead of the spec's 46.9 lb, costing ~600 ft of apogee). Removed: the
+        43 lb empty weight + 3.9 lb tank contents now matches the spec exactly. -->
+ </mass_balance>
+
+ <propulsion>
+    <engine file="cesaroni_l1720_engine">
+        <feed>0</feed>
+        <running>0</running>
+        <starter>0</starter>
+        <thruster file="l1720_nozzle">
+            <location unit="FT">  <!-- Motor at rear of rocket -->
+                <x>9.08</x>  <!-- 109" from nose -->
+                <y>0.0</y>
+                <z>0.0</z>
+            </location>
+            <orient>
+                <pitch unit="DEG">0.0</pitch>  <!-- Aligned with body X-axis for forward thrust -->
+                <yaw unit="DEG">0.0</yaw>
+            </orient>
+        </thruster>
+    </engine>
+    <tank type="FUEL">
+        <fuel_type>FUEL</fuel_type>
+        <location unit="FT">  <!-- Motor fuel location -->
+            <x>7.5</x>  <!-- Motor center -->
+            <y>0.0</y>
+            <z>0.0</z>
+        </location>
+        <capacity unit="LBS">3.9</capacity>  <!-- L1720 propellant mass -->
+        <contents unit="LBS">3.9</contents>
+    </tank>
+ </propulsion>
+
+ <system file="Conventional Controls.xml"/>
+ <system file="Landing Gear.xml"/>
+
+ <flight_control name="FCS: My Aircraft">
+   <channel name="Landing Gear">
+    <switch name="fcs/gear-no-wow">
+      <default value="1"/>
+    </switch>
+  </channel>
+ </flight_control>
+
+ <aerodynamics>
+
+  <axis name="LIFT">
+
+    <!-- Lift above 0.85 and below -0.85 is generalised -->
+    <function name="aero/force/Lift_alpha">
+      <description>Lift due to alpha</description>
+      <product>
+          <property>aero/qbar-psf</property>
+          <property>metrics/Sw-sqft</property>
+          <table>
+            <independentVar lookup="row">aero/alpha-rad</independentVar>
+            <tableData>
+              -1.57  0.0000
+              -1.22  0.0000  <!-- No lift for rocket body -->
+              -1.05  0.0000
+              -0.88  0.0000
+               0.00  0.0000  <!-- Zero lift at zero alpha -->
+               0.88  0.0000
+               1.05  0.0000
+               1.22  0.0000
+               1.57  0.0000
+            </tableData>
+          </table>
+      </product>
+    </function>
+
+    <function name="aero/force/Lift_pitch_rate">
+        <description>Lift due to pitch rate</description>
+        <product>
+          <property>aero/qbar-psf</property>
+          <property>metrics/Sw-sqft</property>
+          <property>velocities/q-aero-rad_sec</property>
+          <property>aero/ci2vel</property>
+          <value> 0.0 </value>  <!-- No lift due to pitch rate for rocket -->
+        </product>
+      </function>
+
+      <function name="aero/force/Lift_alpha_rate">
+        <description>Lift due to alpha rate</description>
+        <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>aero/alphadot-rad_sec</property>
+           <property>aero/ci2vel</property>
+           <value> 0.0 </value>  <!-- No lift due to alpha rate for rocket -->
+        </product>
+      </function>
+
+    <function name="aero/force/Lift_elevator">
+       <description>Lift due to Elevator Deflection</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>fcs/elevator-pos-rad</property>
+           <value> 0.0 </value>  <!-- No elevators on rocket -->
+       </product>
+    </function>
+
+  </axis>
+
+  <axis name="DRAG">
+
+    <!-- CD0 is based on fuselage, wing, horizontal- en vertical tail -->
+    <!-- CD for gear (fixed and retractable) is defined below         -->
+    <function name="aero/force/Drag_minimum">
+       <description>Minimum drag - rocket body drag coefficient</description>
+       <product>
+          <property>aero/qbar-psf</property>
+          <property>metrics/Sw-sqft</property>
+          <value> 0.38 </value>  <!-- Lower end of CFD range 0.38-0.47 for actual performance -->
+       </product>
+    </function>
+
+    <function name="aero/force/Drag_alpha">
+       <description>Drag due to alpha</description>
+       <product>
+          <property>aero/qbar-psf</property>
+          <property>metrics/Sw-sqft</property>
+          <table>
+            <independentVar lookup="row">aero/alpha-rad</independentVar>
+            <tableData>
+             -1.57    0.1500  <!-- Much lower drag at high angles for streamlined rocket -->
+              0.00    0.0000
+              1.57    0.1500  <!-- Much lower drag at high angles for streamlined rocket -->
+            </tableData>
+          </table>
+       </product>
+    </function>
+
+    <function name="aero/force/Drag_induced">
+       <description>Induced drag</description>
+         <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>aero/cl-squared</property>
+           <value> 0.0001 </value>  <!-- Essentially zero induced drag for rocket -->
+         </product>
+    </function>
+
+    <function name="aero/force/Drag_mach">
+       <description>Drag due to mach</description>
+        <product>
+          <property>aero/qbar-psf</property>
+          <property>metrics/Sw-sqft</property>
+          <table>
+            <independentVar lookup="row">velocities/mach</independentVar>
+            <tableData>
+                0.00    0.0000
+                0.70    0.0000
+                1.10    0.005   <!-- Lower transonic drag for streamlined rocket -->
+                1.80    0.002   <!-- Lower supersonic drag for streamlined rocket -->
+            </tableData>
+          </table>
+        </product>
+    </function>
+
+    <function name="aero/force/Drag_beta">
+       <description>Drag due to sideslip</description>
+       <product>
+          <property>aero/qbar-psf</property>
+          <property>metrics/Sw-sqft</property>
+          <table>
+            <independentVar lookup="row">aero/beta-rad</independentVar>
+            <tableData>
+              -1.57    0.0500  <!-- Much lower sideslip drag for streamlined rocket -->
+              -0.26    0.0050
+               0.00    0.0000
+               0.26    0.0050
+               1.57    0.0500  <!-- Much lower sideslip drag for streamlined rocket -->
+            </tableData>
+          </table>
+       </product>
+    </function>
+
+    <function name="aero/force/Drag_elevator">
+       <description>Drag due to Elevator Deflection</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <abs><property>fcs/elevator-pos-rad</property></abs>
+           <value> 0.001 </value>  <!-- Very minimal fin deflection drag for rocket -->
+       </product>
+    </function>
+
+    <function name="aero/force/Drag_fins">
+       <description>Drag due to fins</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <value> 0.008 </value>  <!-- Small fin drag coefficient -->
+       </product>
+    </function>
+
+  </axis>
+
+  <axis name="SIDE">
+
+    <function name="aero/force/Side_beta">
+       <description>Side force due to beta</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>aero/beta-rad</property>
+           <value> 0.0 </value>  <!-- No side force for rocket body -->
+       </product>
+    </function>
+    <function name="aero/force/Side_roll_rate">
+       <description>Side force due to roll rate</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>aero/bi2vel</property>
+           <property>velocities/p-aero-rad_sec</property>
+           <value> 0.0 </value>  <!-- No side force due to roll rate for rocket -->
+       </product>
+    </function>
+
+    <function name="aero/force/Side_yaw_rate">
+       <description>Side force due to yaw rate</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>aero/bi2vel</property>
+           <property>velocities/r-aero-rad_sec</property>
+           <value> 0.0 </value>  <!-- No side force due to yaw rate for rocket -->
+       </product>
+    </function>
+
+    <function name="aero/force/Side_rudder">
+       <description>Side force due to rudder</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>fcs/rudder-pos-rad</property>
+           <value> 0.0 </value>  <!-- No rudder on rocket -->
+       </product>
+    </function>
+
+  </axis>
+
+  <axis name="PITCH">
+
+    <function name="aero/moment/Pitch_alpha">
+       <description>Pitch moment due to alpha - fin stability at tail location</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <value>0.08</value>  <!-- Fin area in ft2 -->
+           <value>3.34</value>  <!-- Fin arm in ft (distance from CG to fins) -->
+           <property>aero/alpha-rad</property>
+           <value> -1.0 </value>  <!-- Fins provide restoring pitch moment -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Pitch_elevator">
+       <description>Pitch moment due to elevator</description>
+       <product>
+          <property>aero/qbar-psf</property>
+          <property>metrics/Sw-sqft</property>
+          <property>metrics/cbarw-ft</property>
+          <property>fcs/elevator-pos-rad</property>
+          <value> 0.0 </value>  <!-- No elevator on rocket -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Pitch_damp">
+       <description>Pitch damping from fins. NOTE: the reference model multiplied by
+            aero/ci2vel (= cbar/2V), but this rocket's metrics declare cbar = 0, so the
+            term was ALWAYS ZERO - the vehicle had no attitude damping at all. Rewritten
+            in explicit qbar/V form: M = -C * (qbar/V) * S_fin * arm^2 * q.</description>
+       <product>
+           <quotient>
+             <property>aero/qbar-psf</property>
+             <max>
+               <property>velocities/vt-fps</property>
+               <value> 50.0 </value>  <!-- avoid divide-by-zero on the pad -->
+             </max>
+           </quotient>
+           <value>0.08</value>   <!-- Fin area in ft2 -->
+           <value>11.16</value>  <!-- Fin arm squared, ft2 (3.34^2) -->
+           <property>velocities/q-aero-rad_sec</property>
+           <value> -15.0 </value>  <!-- damping strength (~0.3 damping ratio at 460 fps) -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Pitch_alphadot">
+       <description>Pitch moment due to alpha rate</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>metrics/cbarw-ft</property>
+           <property>aero/ci2vel</property>
+           <property>aero/alphadot-rad_sec</property>
+           <value> 0.0 </value>  <!-- No pitch moment due to alpha rate for rocket -->
+       </product>
+    </function>
+
+  </axis>
+
+  <axis name="ROLL">
+
+    <function name="aero/moment/Roll_beta">
+       <description>Roll moment due to beta</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>metrics/bw-ft</property>
+           <property>aero/beta-rad</property>
+           <property>fcs/gear-no-wow</property>
+           <value> 0.0 </value>  <!-- No roll moment for rocket body -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Roll_damp">
+       <description>Roll damping from fins - explicit qbar/V form (the reference used
+            aero/bi2vel = span/2V, always zero because metrics span = 0; see Pitch_damp).</description>
+       <product>
+           <quotient>
+             <property>aero/qbar-psf</property>
+             <max>
+               <property>velocities/vt-fps</property>
+               <value> 50.0 </value>
+             </max>
+           </quotient>
+           <value>0.08</value>    <!-- Total fin area in ft2 -->
+           <value>0.0625</value>  <!-- Fin span from centerline squared, ft2 (0.25^2) -->
+           <property>velocities/p-aero-rad_sec</property>
+           <value> -5.0 </value>  <!-- damping strength -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Roll_yaw">
+       <description>Roll moment due to yaw rate</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>metrics/bw-ft</property>
+           <property>aero/bi2vel</property>
+           <property>velocities/r-aero-rad_sec</property>
+           <value> 0.0 </value>  <!-- No roll moment due to yaw rate for rocket -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Roll_aileron">
+       <description>Roll moment due to aileron</description>
+       <product>
+          <property>aero/qbar-psf</property>
+          <property>metrics/Sw-sqft</property>
+          <property>metrics/bw-ft</property>
+          <property>fcs/left-aileron-pos-rad</property>
+          <value> 0.0 </value>  <!-- No ailerons on rocket -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Roll_rudder">
+       <description>Roll moment due to rudder</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>metrics/bw-ft</property>
+           <property>fcs/rudder-pos-rad</property>
+           <value> 0.0 </value>  <!-- No rudder on rocket -->
+       </product>
+    </function>
+
+  </axis>
+
+  <axis name="YAW">
+
+    <function name="aero/moment/Yaw_alpha">
+       <description>Yaw moment due to alpha</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>metrics/bw-ft</property>
+           <property>aero/alpha-rad</property>
+           <property>fcs/gear-no-wow</property>
+           <value> 0.0 </value>  <!-- No yaw moment due to alpha for rocket -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Yaw_beta">
+       <description>Yaw moment due to beta - fin stability at tail location</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <value>0.08</value>  <!-- Fin area in ft2 -->
+           <value>3.34</value>  <!-- Fin arm in ft (distance from CG to fins) -->
+           <property>aero/beta-rad</property>
+           <!-- SIGN FIX vs the reference model: in JSBSim body axes a RESTORING
+                (weathercock) yaw moment is Cn_beta POSITIVE - opposite convention to
+                pitch, where restoring Cm_alpha is negative. The reference used -1.0
+                here, which made the rocket aerodynamically UNSTABLE in yaw: it
+                diverged into a tumble within a fraction of a second of burnout
+                (during the burn, high axial acceleration masks it). -->
+           <value> 1.0 </value>  <!-- Fins provide restoring yaw moment -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Yaw_roll_rate">
+       <description>Yaw moment due to roll rate</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>metrics/bw-ft</property>
+           <property>aero/bi2vel</property>
+           <property>velocities/p-rad_sec</property>
+           <value> 0.0 </value>  <!-- No yaw moment due to roll rate for rocket -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Yaw_damp">
+       <description>Yaw damping from fins - explicit qbar/V form (the reference used
+            aero/bi2vel = span/2V, always zero because metrics span = 0; see Pitch_damp).</description>
+       <product>
+           <quotient>
+             <property>aero/qbar-psf</property>
+             <max>
+               <property>velocities/vt-fps</property>
+               <value> 50.0 </value>
+             </max>
+           </quotient>
+           <value>0.08</value>   <!-- Fin area in ft2 -->
+           <value>11.16</value>  <!-- Fin arm squared, ft2 (3.34^2) -->
+           <property>velocities/r-aero-rad_sec</property>
+           <value> -15.0 </value>  <!-- damping strength -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Yaw_rudder">
+       <description>Yaw moment due to rudder</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>metrics/bw-ft</property>
+           <property>fcs/rudder-pos-rad</property>
+           <value> 0.0 </value>  <!-- No rudder on rocket -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Yaw_aileron">
+       <description>Adverse yaw</description>
+       <product>
+           <property>aero/qbar-psf</property>
+           <property>metrics/Sw-sqft</property>
+           <property>metrics/bw-ft</property>
+           <property>fcs/left-aileron-pos-rad</property>
+           <value> 0.0 </value>  <!-- No ailerons on rocket -->
+       </product>
+    </function>
+
+  </axis>
+
+ </aerodynamics>
+
+ <external_reactions>
+  <property value="0">external_reactions/drogue_chute/drag_area</property>
+  <property value="0">external_reactions/main_chute/drag_area</property>
+
+  <force name="drogue_chute" frame="WIND">
+   <function>
+    <product>
+     <property>aero/qbar-psf</property>
+     <property>external_reactions/drogue_chute/drag_area</property>
+    </product>
+   </function>
+   <location unit="FT">  <!-- Nose of rocket for drogue -->
+    <x> 0 </x>
+    <y> 0 </y>
+    <z> 0 </z>
+   </location>
+   <direction>
+    <x>-1 </x>  <!-- Opposes forward motion -->
+    <y> 0 </y>
+    <z> 0 </z>
+   </direction>
+  </force>
+
+  <force name="main_chute" frame="WIND">
+   <function>
+    <product>
+     <property>aero/qbar-psf</property>
+     <property>external_reactions/main_chute/drag_area</property>
+    </product>
+   </function>
+   <location unit="FT">  <!-- Nose of rocket for main chute -->
+    <x> 0 </x>
+    <y> 0 </y>
+    <z> 0 </z>
+   </location>
+   <direction>
+    <x>-1 </x>  <!-- Opposes forward motion -->
+    <y> 0 </y>
+    <z> 0 </z>
+   </direction>
+  </force>
+
+ </external_reactions>
+
+ <ground_reactions>
+    <!-- 3-point tripod at the tail (the down-pointing end when vertical). -->
+    <!-- STRUCTURE contacts (no wheels/steering) with firm, damped springs -->
+    <!-- so the ~47 lb rocket rests on the pad and survives a chute landing. -->
+    <contact type="STRUCTURE" name="TAIL_CONTACT_1">
+        <location unit="FT">
+            <x>9.08</x>
+            <y>0.25</y>
+            <z>0.0</z>
+        </location>
+        <static_friction>0.8</static_friction>
+        <dynamic_friction>0.7</dynamic_friction>
+        <spring_coeff unit="LBS/FT">300.0</spring_coeff>
+        <damping_coeff unit="LBS/FT/SEC">15.0</damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="TAIL_CONTACT_2">
+        <location unit="FT">
+            <x>9.08</x>
+            <y>-0.125</y>
+            <z>0.2165</z>
+        </location>
+        <static_friction>0.8</static_friction>
+        <dynamic_friction>0.7</dynamic_friction>
+        <spring_coeff unit="LBS/FT">300.0</spring_coeff>
+        <damping_coeff unit="LBS/FT/SEC">15.0</damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="TAIL_CONTACT_3">
+        <location unit="FT">
+            <x>9.08</x>
+            <y>-0.125</y>
+            <z>-0.2165</z>
+        </location>
+        <static_friction>0.8</static_friction>
+        <dynamic_friction>0.7</dynamic_friction>
+        <spring_coeff unit="LBS/FT">300.0</spring_coeff>
+        <damping_coeff unit="LBS/FT/SEC">15.0</damping_coeff>
+    </contact>
+</ground_reactions>
+
+</fdm_config>

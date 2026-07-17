@@ -17,6 +17,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
+#include "Engine/Canvas.h"
+#include "CanvasTypes.h"
 
 #pragma warning( pop )
 
@@ -36,20 +38,32 @@ FJSBSimMovementCompVisualizer::~FJSBSimMovementCompVisualizer()
 void FJSBSimMovementCompVisualizer::DrawVisualization(const UActorComponent* Component, const FSceneView* View, FPrimitiveDrawInterface* PDI)
 {
 	const UJSBSimMovementComponent* MovementComponent = Cast<UJSBSimMovementComponent>(Component);
-	AActor* Owner = Component->GetOwner();
+
+	// The editor can call visualizers with stale/dying components (e.g. while the owning
+	// actor is being deleted from the level) - guard everything before touching it.
+	if (!MovementComponent || !IsValid(MovementComponent))
+	{
+		return;
+	}
+
+	AActor* Owner = MovementComponent->GetOwner();
+	if (!Owner || !IsValid(Owner))
+	{
+		return;
+	}
 
 	// Make sure we are ready to visualize this component
 	if (!MovementComponent->IsReadyForCompVisualizer)
 	{
-		// We must call PrepareModelForCompVisualizer(), but this is not a const method, and then can't be called using the MovementComponent pointer above. 
-		// Trick - Grab an editable pointer to if from the owner... 
+		// We must call PrepareModelForCompVisualizer(), but this is not a const method, and then can't be called using the MovementComponent pointer above.
+		// Trick - Grab an editable pointer to if from the owner...
 		UJSBSimMovementComponent* EditableMovementComponent = Cast<UJSBSimMovementComponent>(Owner->GetComponentByClass(UJSBSimMovementComponent::StaticClass()));
 		if (EditableMovementComponent)
 		{
-			EditableMovementComponent->PrepareModelForCompVisualizer(); 
+			EditableMovementComponent->PrepareModelForCompVisualizer();
 		}
 	}
-	
+
 	// Draw visualization helpers
 	if (Owner)
 	{
@@ -85,7 +99,16 @@ void FJSBSimMovementCompVisualizer::DrawVisualization(const UActorComponent* Com
 void FJSBSimMovementCompVisualizer::DrawVisualizationHUD(const UActorComponent* Component, const FViewport* Viewport, const FSceneView* View, FCanvas* Canvas)
 {
 	const UJSBSimMovementComponent* MovementComponent = Cast<UJSBSimMovementComponent>(Component);
+	if (!MovementComponent || !IsValid(MovementComponent) || !View || !Canvas)
+	{
+		return;
+	}
+
 	AActor* Owner = MovementComponent->GetOwner();
+	if (!Owner || !IsValid(Owner))
+	{
+		return;
+	}
 
 	FVector2D PixelLocation;
 

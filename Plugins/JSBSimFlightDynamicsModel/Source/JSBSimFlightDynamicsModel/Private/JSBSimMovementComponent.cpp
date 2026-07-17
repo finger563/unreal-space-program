@@ -232,8 +232,17 @@ double UJSBSimMovementComponent::GetAGLevel(const FVector& StartECEFLocation, FV
   }
   else
   {
-    ECEFContactPoint = FVector();
-    ECEFNormal = FVector::ZAxisVector;
+    // Raycast failed (no collision under the query point - e.g. terrain tiles not loaded or
+    // physics meshes disabled). Fall back to the sea-level ellipsoid as the ground, like
+    // JSBSim's default ground callback. Returning a zeroed contact point here would make
+    // JSBSim believe the terrain is at the center of the earth, producing garbage
+    // ground-reaction forces and letting the vehicle fall to sea level.
+    FGeographicCoordinates QueryGeographic;
+    GeoReferencingSystem->ECEFToGeographic(StartECEFLocation, QueryGeographic);
+    HAT = QueryGeographic.Altitude;
+    QueryGeographic.Altitude = 0.0;
+    GeoReferencingSystem->GeographicToECEF(QueryGeographic, ECEFContactPoint);
+    ECEFNormal = Up;
   }
   return HAT;
 }
@@ -542,7 +551,17 @@ void UJSBSimMovementComponent::PrepareJSBSim()
 			IC->SetVEastFpsIC(gndVelNED(2));
 			IC->SetVDownFpsIC(gndVelNED(3));
 		}
-		DoTrim();
+		if (bTrimOnStart)
+		{
+			DoTrim();
+		}
+		else
+		{
+			// Rockets / ballistic vehicles: no aerodynamic trim to solve. Re-run the
+			// Initial Conditions so integrators start from the exact pad state instead.
+			UE_LOG(LogJSBSim, Display, TEXT("bTrimOnStart is false - skipping trim, using Initial Conditions directly."));
+			Exec->RunIC();
+		}
 		TrimNeeded = false;
 	}
 
