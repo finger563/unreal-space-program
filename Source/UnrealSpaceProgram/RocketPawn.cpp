@@ -191,9 +191,13 @@ ARocketPawn::ARocketPawn()
 	// --- Parachutes ---
 	// Each canopy root sits at the harness point on top of the payload bay and swings as a
 	// pendulum; the dome hangs LineLength further along +X with shroud lines between.
+	// Bridle points match rocket.xml's external_reactions locations exactly: the drogue is tied
+	// to the aft end of the NOSE section (which is ejected and carries it), and the main to the
+	// PAYLOAD/TAIL joint. Parenting each canopy to the section it is actually tied to means it
+	// tracks that piece as the train articulates, instead of floating at a fixed spot.
 	DrogueCanopyRoot = CreateDefaultSubobject<USceneComponent>(TEXT("DrogueCanopyRoot"));
-	DrogueCanopyRoot->SetupAttachment(UpperRoot);
-	DrogueCanopyRoot->SetRelativeLocation(FVector(UpperLengthCm, 0.0f, 0.0f));
+	DrogueCanopyRoot->SetupAttachment(NoseRoot);
+	DrogueCanopyRoot->SetRelativeLocation(FVector::ZeroVector);
 	DrogueCanopyRoot->SetVisibility(false, true);
 
 	DrogueCanopyMesh = MakeSectionMesh(TEXT("DrogueCanopyMesh"), DrogueCanopyRoot);
@@ -201,7 +205,7 @@ ARocketPawn::ARocketPawn()
 
 	MainCanopyRoot = CreateDefaultSubobject<USceneComponent>(TEXT("MainCanopyRoot"));
 	MainCanopyRoot->SetupAttachment(UpperRoot);
-	MainCanopyRoot->SetRelativeLocation(FVector(UpperLengthCm, 0.0f, 0.0f));
+	MainCanopyRoot->SetRelativeLocation(FVector::ZeroVector); // payload/tail joint
 	MainCanopyRoot->SetVisibility(false, true);
 
 	MainCanopyMesh = MakeSectionMesh(TEXT("MainCanopyMesh"), MainCanopyRoot);
@@ -314,13 +318,23 @@ void ARocketPawn::OnConstruction(const FTransform& Transform)
 	{
 		NoseRoot->SetRelativeLocation(FVector(BoosterLengthCm + UpperLengthCm, 0.0f, 0.0f));
 	}
-	if (DrogueCanopyRoot)
+	// Canopy roots sit at their bridle points: drogue at the nose section's aft joint (which is
+	// NoseRoot's own origin) and main at the payload/tail joint (UpperRoot's origin), so both
+	// are zero offsets from their parents.
+	//
+	// The parent is re-applied here rather than trusted from the constructor: a Blueprint
+	// subclass (BP_Rocket) caches the inherited component hierarchy when it is compiled, so a
+	// later change to SetupAttachment() in C++ is silently ignored for Blueprint-derived
+	// instances. That left the drogue parented to the payload bay instead of the nose section.
+	if (DrogueCanopyRoot && NoseRoot)
 	{
-		DrogueCanopyRoot->SetRelativeLocation(FVector(UpperLengthCm, 0.0f, 0.0f));
+		DrogueCanopyRoot->AttachToComponent(NoseRoot, FAttachmentTransformRules::KeepRelativeTransform);
+		DrogueCanopyRoot->SetRelativeLocation(FVector::ZeroVector);
 	}
-	if (MainCanopyRoot)
+	if (MainCanopyRoot && UpperRoot)
 	{
-		MainCanopyRoot->SetRelativeLocation(FVector(UpperLengthCm, 0.0f, 0.0f));
+		MainCanopyRoot->AttachToComponent(UpperRoot, FAttachmentTransformRules::KeepRelativeTransform);
+		MainCanopyRoot->SetRelativeLocation(FVector::ZeroVector);
 	}
 
 	BuildAirframeGeometry();
@@ -547,25 +561,49 @@ void ARocketPawn::BeginPlay()
 
 	// Cable endpoints can only be resolved once the components exist in a live world, so they
 	// are wired here rather than in the constructor.
-	if (ShockCord && BoosterRoot)
+	// UCableComponent integrates its particles in WORLD space. On a rocket descending at 20 m/s
+	// and swinging under a chute, the default settings let the rope lag behind its endpoints and
+	// whip. Substepping plus extra solver iterations keeps it stable, and a reduced gravity
+	// scale stops it sagging into a huge loop at speed.
+	auto TuneCable = [this](UCableComponent* Cable, USceneComponent* EndComponent, const FVector& EndOffset, float Length)
 	{
-		ShockCord->SetAttachEndToComponent(BoosterRoot, NAME_None);
-		ShockCord->EndLocation = FVector(BoosterLengthCm * 0.9f, 0.0f, 0.0f);
-		ShockCord->CableLength = ShockCordLengthCm;
-		ShockCord->CableWidth = CableWidthCm;
-	}
-	if (NoseTether && NoseRoot)
-	{
-		NoseTether->SetAttachEndToComponent(NoseRoot, NAME_None);
-		NoseTether->EndLocation = FVector::ZeroVector;
-		NoseTether->CableLength = NoseTetherLengthCm;
-		NoseTether->CableWidth = CableWidthCm;
-	}
+		if (!Cable || !EndComponent)
+		{
+			return;
+		}
+
+		Cable->SetAttachEndToComponent(EndComponent, NAME_None);
+		Cable->EndLocation = EndOffset;
+		Cable->CableLength = Length;
+		Cable->CableWidth = CableWidthCm;
+
+		Cable->bUseSubstepping = true;
+		Cable->SubstepTime = 0.005f;
+		Cable->SolverIterations = 16;
+		Cable->bEnableStiffness = true;
+		Cable->CableGravityScale = 0.25f;
+	};
+
+	TuneCable(ShockCord, BoosterRoot, FVector(BoosterLengthCm * 0.9f, 0.0f, 0.0f), ShockCordLengthCm);
+	TuneCable(NoseTether, NoseRoot, FVector::ZeroVector, NoseTetherLengthCm);
 
 	// Assign any Niagara overrides. Slots left unset keep the code-built fallbacks.
 	if (ExhaustFX && ExhaustEffect)
 	{
 		ExhaustFX->SetAsset(ExhaustEffect);
+	}
+
+	// Re-assert the canopy parents at runtime too: OnConstruction does not run for every spawn
+	// path, and a stale Blueprint hierarchy would otherwise put the drogue on the wrong section.
+	if (DrogueCanopyRoot && NoseRoot)
+	{
+		DrogueCanopyRoot->AttachToComponent(NoseRoot, FAttachmentTransformRules::KeepRelativeTransform);
+		DrogueCanopyRoot->SetRelativeLocation(FVector::ZeroVector);
+	}
+	if (MainCanopyRoot && UpperRoot)
+	{
+		MainCanopyRoot->AttachToComponent(UpperRoot, FAttachmentTransformRules::KeepRelativeTransform);
+		MainCanopyRoot->SetRelativeLocation(FVector::ZeroVector);
 	}
 
 	SmokePuffSpawnTimes.Init(-1.0f, FMath::Max(MaxSmokePuffs, 0));
@@ -577,18 +615,31 @@ void ARocketPawn::BeginPlay()
 void ARocketPawn::ResetVisuals()
 {
 	BoosterMotion.Reset();
+	UpperMotion.Reset();
 	NoseMotion.Reset();
 
 	DrogueInflation = 0.0f;
 	MainInflation = 0.0f;
 	DrogueDeployTime = -1.0f;
 	MainDeployTime = -1.0f;
+	DrogueAxis = FVector::XAxisVector;
+	MainAxis = FVector::XAxisVector;
+	AirflowLocal = -FVector::XAxisVector;
+	AirspeedFps = 0.0f;
+
+	if (DrogueCanopyMesh) { DrogueCanopyMesh->SetRelativeScale3D(FVector::OneVector); }
+	if (MainCanopyMesh) { MainCanopyMesh->SetRelativeScale3D(FVector::OneVector); }
 
 	bWasSeparated = false;
 	bWasMainDeployed = false;
 	bWasLanded = false;
 
 	if (BoosterRoot) { BoosterRoot->SetRelativeLocationAndRotation(FVector::ZeroVector, FRotator::ZeroRotator); }
+	if (UpperRoot)
+	{
+		UpperRoot->SetRelativeLocationAndRotation(
+			FVector(BoosterLengthCm, 0.0f, 0.0f), FRotator::ZeroRotator);
+	}
 	if (NoseRoot)
 	{
 		NoseRoot->SetRelativeLocationAndRotation(
@@ -622,6 +673,8 @@ void ARocketPawn::Tick(float DeltaSeconds)
 		UpdateChaseCamera();
 	}
 
+	SampleAirflow();
+
 	if (!IsSingleMeshMode())
 	{
 		UpdateSeparation(DeltaSeconds);
@@ -634,8 +687,121 @@ void ARocketPawn::Tick(float DeltaSeconds)
 }
 
 // ---------------------------------------------------------------------------------------------
+// Airflow
+// ---------------------------------------------------------------------------------------------
+
+void ARocketPawn::SampleAirflow()
+{
+	if (!JSBSim)
+	{
+		return;
+	}
+
+	// One batched read per frame. These are body-frame velocities THROUGH THE AIR, so the
+	// FDM's wind and turbulence are already folded in - there is no separate wind model here,
+	// and setting WindIntensityKts / WindHeading on the movement component (or driving
+	// atmosphere/turb-* properties) will show up in the visuals for free.
+	static const TArray<FString> Properties = {
+		TEXT("velocities/u-aero-fps"),
+		TEXT("velocities/v-aero-fps"),
+		TEXT("velocities/w-aero-fps")
+	};
+	const TArray<FString> NoWrites = { TEXT(""), TEXT(""), TEXT("") };
+
+	TArray<FString> Values;
+	JSBSim->CommandConsoleBatch(Properties, NoWrites, Values);
+
+	if (Values.Num() < 3)
+	{
+		return;
+	}
+
+	// CommandConsoleBatch leaves an entry empty when the property does not resolve, and Atof("")
+	// is 0 - which would silently degrade every airflow-driven visual to its fallback with no
+	// indication why. Say so once instead.
+	// Deliberately waits until the rocket is actually moving through the air: sampling on the
+	// pad only proves the property names resolve, not that they track.
+	const bool bMoving = !Values[0].IsEmpty() && FMath::Abs(FCString::Atof(*Values[0])) > 10.0f;
+	if (!bLoggedAirflowStatus && (bMoving || Values[0].IsEmpty()))
+	{
+		bLoggedAirflowStatus = true;
+		if (Values[0].IsEmpty() || Values[1].IsEmpty() || Values[2].IsEmpty())
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Rocket: JSBSim velocities/*-aero-fps did not resolve; canopy and section "
+					 "visuals will fall back to the body axis and ignore wind."));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Display,
+				TEXT("Rocket: airflow sampling live (u=%s v=%s w=%s ft/s)."),
+				*Values[0], *Values[1], *Values[2]);
+		}
+	}
+
+	// Body (X fwd, Y right, Z down) -> actor local (X fwd, Y right, Z up).
+	const FVector AirVelocityFps(
+		FCString::Atof(*Values[0]),
+		FCString::Atof(*Values[1]),
+		-FCString::Atof(*Values[2]));
+
+	AirspeedFps = AirVelocityFps.Size();
+
+	// Below a walking pace the direction is noise, so hold the last good axis rather than
+	// letting the canopy and sections jitter around a meaningless vector.
+	if (AirspeedFps > 3.0f)
+	{
+		AirflowLocal = AirVelocityFps / AirspeedFps;
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
 // Separation dynamics
 // ---------------------------------------------------------------------------------------------
+
+FVector ARocketPawn::MakeBuffet(float Scale) const
+{
+	if (Scale <= 0.0f || AirspeedFps <= 1.0f)
+	{
+		return FVector::ZeroVector;
+	}
+
+	// Buffeting acts across the airflow, not along it: a section trailing in the wind shudders
+	// sideways, it does not surge back and forth down its own cord.
+	FVector Random = FMath::VRand();
+	Random -= AirflowLocal * FVector::DotProduct(Random, AirflowLocal);
+
+	// Dynamic pressure goes with speed squared, which is what makes the shudder build up
+	// noticeably during the fast drogue descent and calm down under the main.
+	const float SpeedFactor = FMath::Square(AirspeedFps / 100.0f);
+
+	return Random.GetSafeNormal() * Scale * SpeedFactor;
+}
+
+FVector ARocketPawn::MakeSwing(float Scale, float PhaseOffset) const
+{
+	if (Scale <= 0.0f)
+	{
+		return FVector::ZeroVector;
+	}
+
+	const float Time = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	const float Omega = (2.0f * PI) / FMath::Max(CanopySwingPeriodSeconds, 0.2f);
+
+	// A stable basis across the airflow. Which perpendicular pair we pick does not matter, only
+	// that it is consistent frame to frame, or the swing direction would wander.
+	FVector Side = FVector::CrossProduct(AirflowLocal, FVector::XAxisVector);
+	if (Side.IsNearlyZero())
+	{
+		Side = FVector::CrossProduct(AirflowLocal, FVector::YAxisVector);
+	}
+	Side = Side.GetSafeNormal();
+	const FVector Up = FVector::CrossProduct(AirflowLocal, Side).GetSafeNormal();
+
+	// Two axes a quarter period apart trace a lazy cone rather than a flat back-and-forth.
+	return (Side * FMath::Sin(Time * Omega + PhaseOffset)
+		  + Up * FMath::Sin(Time * Omega * 0.87f + PhaseOffset + HALF_PI)) * Scale;
+}
 
 void ARocketPawn::UpdateSeparation(float DeltaSeconds)
 {
@@ -654,10 +820,125 @@ void ARocketPawn::UpdateSeparation(float DeltaSeconds)
 		return;
 	}
 
-	// --- Booster release: kicked aft down the shock cord at separation. ---
+	// The recovery train comes apart in TWO stages, matching the FDM's bridle points:
+	//
+	//   At apogee (drogue):  only the NOSE section leaves, carrying the drogue bridled to its
+	//                        base (rocket.xml external_reactions, x = 2.031 ft). The payload and
+	//                        tail stay joined as one body and hang below it on the nose tether.
+	//
+	//   At main deploy:      the main lifts from the PAYLOAD/TAIL joint (x = 5.476 ft), and
+	//                        those two finally come apart - payload at the bridle, tail hanging
+	//                        below it on the shock cord.
+	//
+	// Each link anchors to the CURRENT position of the one above it, so a swing at the top
+	// propagates down the stack. Solved in that order for the same reason: a link reads its
+	// parent's already-updated position this frame rather than lagging a frame behind.
+
+	// --- Nose section: ejected at apogee, and the drogue is bridled to its base. ---
+	const FVector StowedNose(BoosterLengthCm + UpperLengthCm, 0.0f, 0.0f);
+
+	if (NoseRoot)
+	{
+		if (bSeparated && !NoseMotion.bReleased)
+		{
+			NoseMotion.bReleased = true;
+			// Thrown forward off the payload bay by the ejection charge.
+			const FVector Direction = RandomDirectionInCone(FVector::XAxisVector, SeparationConeAngleDeg * 1.8f);
+			NoseMotion.Velocity = Direction * NoseEjectSpeed;
+			NoseMotion.AngularVelocity = FVector(
+				FMath::FRandRange(-1.0f, 1.0f),
+				FMath::FRandRange(-1.0f, 1.0f),
+				FMath::FRandRange(-1.0f, 1.0f)) * SeparationTumbleRate * 1.4f;
+
+			if (SeparationEffect)
+			{
+				UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+					this, SeparationEffect, NoseRoot->GetComponentLocation(), NoseRoot->GetComponentRotation());
+			}
+		}
+
+		if (NoseMotion.bReleased)
+		{
+			// Held up by the drogue once it inflates, so it barely travels - but it is bridled
+			// at its BASE, so it hangs tip-down (AlignAxisSign = -1).
+			FRocketSectionForces Forces;
+			// Held UP by the drogue and DOWN by its tether to the payload bay, so it floats at
+			// roughly full tether extension above the stack. Anchoring to a short bridle at its
+			// own stowed spot instead would leave it only ~35 cm clear - and since it hangs
+			// tip-down and is 62 cm long, its tip would end up inside the payload bay.
+			Forces.Anchor = UpperMotion.Position;
+			Forces.CordLength = NoseTetherLengthCm;
+			Forces.SettleDir = AirflowLocal;
+			// While the DROGUE is carrying the train the nose is being LIFTED, not falling, so
+			// the settle reverses and it rides above everything else. Once the main is out it
+			// takes over as the load-bearing canopy, so the nose stops being held up and hangs
+			// below on its tether - otherwise the nose (and the drogue above it) would stay the
+			// highest thing in the sky with the much larger main canopy underneath it.
+			Forces.SettleAccel = (FlightController->bDrogueDeployed && !bMainOut)
+				? -SectionSettleAccel * 0.5f
+				: SectionSettleAccel * 0.8f;
+			Forces.BuffetAccel = MakeBuffet(SectionBuffetScale * 1.7f)
+				+ MakeSwing(SectionSwingAccel * 0.6f, 0.0f);
+			Forces.LinearDamping = SectionLinearDamping;
+			Forces.AngularDamping = SectionAngularDamping;
+			Forces.AlignStrength = SectionAlignStrength * 0.7f;
+			// The nose is bridled at its BASE, so it must hang tip-down. Its anchor here is the
+			// payload BELOW it (not the drogue above), which inverts the sign: pointing +X
+			// toward that anchor is what puts the tip down and the bridled base up. Using -1
+			// here points the tip skyward and leaves the canopy hanging off the nose's bottom.
+			Forces.AlignAxisSign = 1.0f;
+
+			NoseMotion.Integrate(DeltaSeconds, Forces);
+			NoseRoot->SetRelativeLocationAndRotation(StowedNose + NoseMotion.Position, NoseMotion.Rotation);
+		}
+	}
+
+	// --- Payload bay: dangles below the nose section on its tether. ---
+	if (UpperRoot)
+	{
+		const FVector StowedUpper(BoosterLengthCm, 0.0f, 0.0f);
+
+		// NOT at separation: under the drogue the payload is still bolted to the tail, and the
+		// pair hangs below the nose as a single body. They only come apart when the main lifts
+		// from the joint between them.
+		if (bMainOut && !UpperMotion.bReleased)
+		{
+			UpperMotion.bReleased = true;
+			// Only the recoil of the tail dropping away, so a gentle push with little spin.
+			UpperMotion.Velocity = RandomDirectionInCone(FVector::XAxisVector, SeparationConeAngleDeg) * (NoseEjectSpeed * 0.15f);
+			UpperMotion.AngularVelocity = FVector(
+				FMath::FRandRange(-1.0f, 1.0f),
+				FMath::FRandRange(-1.0f, 1.0f),
+				FMath::FRandRange(-1.0f, 1.0f)) * SeparationTumbleRate * 0.35f;
+		}
+
+		if (UpperMotion.bReleased)
+		{
+			// The main is bridled right at the payload's aft joint, so the bay stays close to
+			// it and is LIFTED by the canopy rather than falling: the settle reverses, exactly
+			// as the nose does under the drogue.
+			FRocketSectionForces Forces;
+			Forces.Anchor = FVector::ZeroVector;
+			Forces.CordLength = MainBridleLengthCm;
+			Forces.SettleDir = AirflowLocal;
+			Forces.SettleAccel = -SectionSettleAccel * 0.5f;
+			Forces.BuffetAccel = MakeBuffet(SectionBuffetScale * 0.8f)
+				+ MakeSwing(SectionSwingAccel * 0.5f, 0.6f);
+			Forces.LinearDamping = SectionLinearDamping;
+			Forces.AngularDamping = SectionAngularDamping;
+			Forces.AlignStrength = SectionAlignStrength;
+
+			UpperMotion.Integrate(DeltaSeconds, Forces);
+			UpperRoot->SetRelativeLocationAndRotation(StowedUpper + UpperMotion.Position, UpperMotion.Rotation);
+		}
+	}
+
+	// --- Tail section: hangs below the payload bay on the shock cord. ---
 	if (BoosterRoot)
 	{
-		if (bSeparated && !BoosterMotion.bReleased)
+		// Also main-deploy, not separation: the tail drops away from the payload only once the
+		// main is between them.
+		if (bMainOut && !BoosterMotion.bReleased)
 		{
 			BoosterMotion.bReleased = true;
 			// Aft is -X in the pawn frame; spread it so runs are not identical.
@@ -668,7 +949,7 @@ void ARocketPawn::UpdateSeparation(float DeltaSeconds)
 				FMath::FRandRange(-1.0f, 1.0f),
 				FMath::FRandRange(-1.0f, 1.0f)) * SeparationTumbleRate;
 
-			if (SeparationEffect)
+			if (SeparationEffect && UpperRoot)
 			{
 				UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 					this, SeparationEffect, UpperRoot->GetComponentLocation(), UpperRoot->GetComponentRotation());
@@ -677,52 +958,21 @@ void ARocketPawn::UpdateSeparation(float DeltaSeconds)
 
 		if (BoosterMotion.bReleased)
 		{
-			// Anchored at the payload bay, settling aft down the cord.
-			BoosterMotion.Integrate(
-				DeltaSeconds,
-				/*Anchor=*/FVector::ZeroVector,
-				/*CordLength=*/ShockCordLengthCm,
-				/*SettleDir=*/-FVector::XAxisVector,
-				SectionSettleAccel,
-				SectionLinearDamping,
-				SectionAngularDamping);
+			FRocketSectionForces Forces;
+			// Anchored to the payload bay's live position (booster stows at the origin, so the
+			// stowed gap is just the payload's own offset).
+			Forces.Anchor = UpperMotion.Position + FVector(BoosterLengthCm, 0.0f, 0.0f);
+			Forces.CordLength = ShockCordLengthCm;
+			Forces.SettleDir = AirflowLocal;
+			Forces.SettleAccel = SectionSettleAccel;
+			Forces.BuffetAccel = MakeBuffet(SectionBuffetScale)
+				+ MakeSwing(SectionSwingAccel, 1.4f);
+			Forces.LinearDamping = SectionLinearDamping;
+			Forces.AngularDamping = SectionAngularDamping;
+			Forces.AlignStrength = SectionAlignStrength;
 
+			BoosterMotion.Integrate(DeltaSeconds, Forces);
 			BoosterRoot->SetRelativeLocationAndRotation(BoosterMotion.Position, BoosterMotion.Rotation);
-		}
-	}
-
-	// --- Nose cone release: blown off by the ejection charge at main deployment. ---
-	if (NoseRoot)
-	{
-		const FVector StowedNose(BoosterLengthCm + UpperLengthCm, 0.0f, 0.0f);
-
-		if (bMainOut && !NoseMotion.bReleased)
-		{
-			NoseMotion.bReleased = true;
-			// Forward and off to one side, the way an ejection charge actually throws it.
-			const FVector Direction = RandomDirectionInCone(FVector::XAxisVector, SeparationConeAngleDeg * 1.8f);
-			NoseMotion.Velocity = Direction * NoseEjectSpeed;
-			NoseMotion.AngularVelocity = FVector(
-				FMath::FRandRange(-1.0f, 1.0f),
-				FMath::FRandRange(-1.0f, 1.0f),
-				FMath::FRandRange(-1.0f, 1.0f)) * SeparationTumbleRate * 1.4f;
-		}
-
-		if (NoseMotion.bReleased)
-		{
-			// The nose dangles from its tether off the top of the payload bay. Both the anchor
-			// and the settle direction are expressed relative to the stowed position, which is
-			// what NoseMotion.Position offsets from.
-			NoseMotion.Integrate(
-				DeltaSeconds,
-				/*Anchor=*/FVector::ZeroVector,
-				/*CordLength=*/NoseTetherLengthCm,
-				/*SettleDir=*/-FVector::XAxisVector,
-				SectionSettleAccel * 0.8f,
-				SectionLinearDamping,
-				SectionAngularDamping);
-
-			NoseRoot->SetRelativeLocationAndRotation(StowedNose + NoseMotion.Position, NoseMotion.Rotation);
 		}
 	}
 
@@ -765,7 +1015,8 @@ void ARocketPawn::UpdateCanopies(float DeltaSeconds)
 		int32 GoreCount,
 		float& Inflation,
 		float& BuiltInflation,
-		float& DeployTime)
+		float& DeployTime,
+		FVector& SmoothedAxis)
 	{
 		if (!CanopyRoot)
 		{
@@ -787,6 +1038,9 @@ void ARocketPawn::UpdateCanopies(float DeltaSeconds)
 		{
 			DeployTime = Now;
 			CanopyRoot->SetVisibility(true, true);
+			// Start already facing the airflow. Easing in from a stale axis would show the
+			// canopy sweeping across the sky in the first moments after deployment.
+			SmoothedAxis = -AirflowLocal;
 		}
 
 		const float SinceDeploy = Now - DeployTime;
@@ -806,25 +1060,72 @@ void ARocketPawn::UpdateCanopies(float DeltaSeconds)
 			BuiltInflation = Inflation;
 		}
 
-		// Pendulum swing about the harness point, decaying as the descent stabilizes.
+		// --- Orientation ---
+		// A canopy sits opposite the airflow, NOT along the airframe's axis. Deriving the axis
+		// from AirflowLocal is what makes it stay overhead while the load below tumbles, and
+		// makes it lean downwind on its own, since JSBSim's aero velocities already carry the
+		// wind and turbulence.
+		FVector DesiredAxis = -AirflowLocal;
+
+		// Pendulum swing about the harness point, decaying as the descent stabilizes. Applied
+		// as a tilt OFF the airflow axis rather than as an absolute body-frame rotation.
 		const float Decay = FMath::Exp(-SinceDeploy * 0.12f);
 		const float Phase = (2.0f * PI * SinceDeploy) / FMath::Max(CanopySwingPeriodSeconds, 0.2f);
 		const float Swing = CanopySwingAngleDeg * Decay;
 
+		// Flutter builds with dynamic pressure, so the chute shudders in fast air and settles
+		// as it slows. Two incommensurate frequencies keep it from looking like a clean sine.
+		const float SpeedFactor = FMath::Clamp(AirspeedFps / FMath::Max(FlutterReferenceSpeedFps, 1.0f), 0.0f, 1.5f);
+		const float Flutter = CanopyFlutterDeg * SpeedFactor;
+
 		// Two axes slightly out of phase gives a lazy conical swing rather than a flat pendulum.
-		CanopyRoot->SetRelativeRotation(FRotator(
-			Swing * FMath::Sin(Phase),
-			0.0f,
-			Swing * FMath::Sin(Phase * 0.85f + 1.1f)));
+		const float TiltA = Swing * FMath::Sin(Phase) + Flutter * FMath::Sin(SinceDeploy * 11.3f);
+		const float TiltB = Swing * FMath::Sin(Phase * 0.85f + 1.1f) + Flutter * FMath::Sin(SinceDeploy * 8.7f + 2.1f);
+
+		// Build a frame around the airflow axis and tilt within it.
+		const FVector Side = FVector::CrossProduct(DesiredAxis, FVector::XAxisVector).GetSafeNormal().IsNearlyZero()
+			? FVector::CrossProduct(DesiredAxis, FVector::YAxisVector).GetSafeNormal()
+			: FVector::CrossProduct(DesiredAxis, FVector::XAxisVector).GetSafeNormal();
+		const FVector Up = FVector::CrossProduct(DesiredAxis, Side).GetSafeNormal();
+
+		DesiredAxis = (DesiredAxis
+			+ Side * FMath::Tan(FMath::DegreesToRadians(TiltA))
+			+ Up * FMath::Tan(FMath::DegreesToRadians(TiltB))).GetSafeNormal();
+
+		// Ease toward the target so the canopy leans and lags like fabric on lines instead of
+		// snapping to every change in the airflow.
+		const float Alpha = FMath::Clamp(CanopyLeanResponse * DeltaSeconds, 0.0f, 1.0f);
+		SmoothedAxis = FMath::Lerp(SmoothedAxis, DesiredAxis, Alpha).GetSafeNormal();
+		if (SmoothedAxis.IsNearlyZero())
+		{
+			SmoothedAxis = FVector::XAxisVector;
+		}
+
+		// SmoothedAxis is in ACTOR-local space, but the canopy roots are parented to sections
+		// that rotate freely (the nose flips tip-down, the payload swings). Applying it as a
+		// relative rotation would compose it with the parent's rotation and swing the canopy
+		// down below its own section. Convert to world and set it absolutely so the canopy is
+		// oriented by the airflow alone, regardless of what the hardware it is tied to is doing.
+		const FVector WorldAxis = GetActorTransform().TransformVectorNoScale(SmoothedAxis);
+		CanopyRoot->SetWorldRotation(FRotationMatrix::MakeFromX(WorldAxis).Rotator());
+
+		// --- Breathing ---
+		// Real canopies pulse in and out under load. Scaling Y/Z on the dome pulses its radius
+		// without regenerating the mesh; X is left alone so the line length and dome depth hold.
+		if (CanopyMesh && CanopyBreathAmount > 0.0f)
+		{
+			const float Breath = 1.0f + CanopyBreathAmount * SpeedFactor * FMath::Sin(SinceDeploy * 4.7f);
+			CanopyMesh->SetRelativeScale3D(FVector(1.0f, Breath, Breath));
+		}
 	};
 
 	Update(DrogueCanopyRoot, DrogueCanopyMesh, DrogueShroudMesh, FlightController->bDrogueDeployed,
 		DrogueCanopyRadiusCm, DrogueLineLengthCm, DrogueGoreCount,
-		DrogueInflation, DrogueBuiltInflation, DrogueDeployTime);
+		DrogueInflation, DrogueBuiltInflation, DrogueDeployTime, DrogueAxis);
 
 	Update(MainCanopyRoot, MainCanopyMesh, MainShroudMesh, FlightController->bMainDeployed,
 		MainCanopyRadiusCm, MainLineLengthCm, MainGoreCount,
-		MainInflation, MainBuiltInflation, MainDeployTime);
+		MainInflation, MainBuiltInflation, MainDeployTime, MainAxis);
 }
 
 void ARocketPawn::UpdateCables()
@@ -834,15 +1135,42 @@ void ARocketPawn::UpdateCables()
 		return;
 	}
 
-	// Cables only exist once the pieces they connect have actually come apart.
-	if (ShockCord)
+	// A cable whose CableLength is fixed while its endpoints move looks wrong in both
+	// directions: far too slack when the section is close, and stretched into a straight line
+	// when it drifts out to full cord. Tracking the live endpoint distance and adding a little
+	// slack keeps a believable catenary the whole way through.
+	auto UpdateCable = [this](UCableComponent* Cable, USceneComponent* EndComponent, const FVector& EndOffset, float MaxLength, bool bVisible)
 	{
-		ShockCord->SetVisibility(FlightController->bAirframeSeparated);
-	}
-	if (NoseTether)
-	{
-		NoseTether->SetVisibility(FlightController->bMainDeployed);
-	}
+		if (!Cable)
+		{
+			return;
+		}
+
+		Cable->SetVisibility(bVisible);
+		if (!bVisible || !EndComponent)
+		{
+			return;
+		}
+
+		const FVector Start = Cable->GetComponentLocation();
+		const FVector End = EndComponent->GetComponentTransform().TransformPosition(EndOffset);
+		const float Separation = FVector::Dist(Start, End);
+
+		// Never shorter than the endpoints are apart (that would stretch it taut and jitter),
+		// never longer than the real cord.
+		Cable->CableLength = FMath::Clamp(Separation * (1.0f + CableSlackFactor), 1.0f, MaxLength);
+	};
+
+	// Cables only exist once the pieces they connect have actually come apart. The shock cord
+	// runs payload -> tail, and those two stay bolted together until the main deploys between
+	// them, so it appears at main deploy rather than at apogee.
+	UpdateCable(ShockCord, BoosterRoot, FVector(BoosterLengthCm * 0.9f, 0.0f, 0.0f),
+		ShockCordLengthCm * (1.0f + CableSlackFactor), FlightController->bMainDeployed);
+
+	// The nose section leaves at apogee now, not at main deploy, so its tether to the payload
+	// bay is strung from separation onward.
+	UpdateCable(NoseTether, NoseRoot, FVector::ZeroVector,
+		NoseTetherLengthCm * (1.0f + CableSlackFactor), FlightController->bAirframeSeparated);
 }
 
 // ---------------------------------------------------------------------------------------------

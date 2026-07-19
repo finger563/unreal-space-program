@@ -261,9 +261,10 @@ void RocketGeometry::BuildTangentOgive(
 	for (int32 i = 0; i <= AxialSegments; i++)
 	{
 		const float X = (Length * i) / AxialSegments;
-		// Distance from the apex, which is how the ogive equation is posed.
-		const float FromApex = Length - X;
-		const float Inner = FMath::Max(Rho * Rho - FromApex * FromApex, 0.0f);
+		// The ogive equation is posed against distance from the BASE, which is exactly what X
+		// measures here. Squaring (Length - X) instead inverts the profile: it puts the apex at
+		// the aft joint and the full-radius base forward, i.e. a nose cone pointing backwards.
+		const float Inner = FMath::Max(Rho * Rho - X * X, 0.0f);
 		const float R = FMath::Max(FMath::Sqrt(Inner) + BaseRadius - Rho, 0.0f);
 		Profile.Add(FVector2D(X, R));
 	}

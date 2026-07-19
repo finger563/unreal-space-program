@@ -599,8 +599,8 @@
   <!-- 1.0 while the airframe is intact; set to 0.0 at recovery separation (done by the
        flight controller when the drogue deploys). Gates the fin stability/damping moments:
        once the rocket breaks into tethered sections, the fins no longer stabilize the
-       stack - without this, fins (nose-into-wind) fight the nose-attached parachute
-       (nose-up) and the vehicle pendulums violently during descent. -->
+       stack - without this, the fins try to weathercock the stack nose-into-wind while the
+       chutes hold it canopy-up, and the vehicle pendulums violently during descent. -->
   <property value="1.0">systems/fins-effective</property>
 
   <force name="drogue_chute" frame="WIND">
@@ -610,8 +610,11 @@
      <property>external_reactions/drogue_chute/drag_area</property>
     </product>
    </function>
-   <location unit="FT">  <!-- Nose of rocket for drogue -->
-    <x> 0 </x>
+   <location unit="FT">
+    <!-- Aft end of the NOSE SECTION (the piece that is ejected at apogee, which the drogue
+         is bridled to). Structural x runs aft from the nose tip, so this is 24.4" back:
+         (276.9 cm airframe - 215 cm nose/payload joint) / 30.48 = 2.031 ft. -->
+    <x> 2.031 </x>
     <y> 0 </y>
     <z> 0 </z>
    </location>
@@ -629,8 +632,11 @@
      <property>external_reactions/main_chute/drag_area</property>
     </product>
    </function>
-   <location unit="FT">  <!-- Nose of rocket for main chute -->
-    <x> 0 </x>
+   <location unit="FT">
+    <!-- Joint between the PAYLOAD (mid) section and the TAIL section, which is where the main
+         is bridled. 65.7" aft of the nose tip:
+         (276.9 cm airframe - 110 cm payload/tail joint) / 30.48 = 5.476 ft. -->
+    <x> 5.476 </x>
     <y> 0 </y>
     <z> 0 </z>
    </location>

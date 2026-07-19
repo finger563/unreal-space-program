@@ -202,6 +202,32 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Recovery", meta = (ClampMin = "0.2"))
 	float CanopySwingPeriodSeconds = 3.2f;
 
+	// --- Canopy response to the airflow ---
+	// The canopy is oriented against the AIR-RELATIVE velocity that JSBSim computes, so wind
+	// and turbulence set into the FDM show up here automatically: the chute leans downwind,
+	// shudders in gusts and breathes, all without a separate wind model.
+
+	/** How quickly the canopy swings to face the airflow (per second). Low = lazy, laggy chute. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Recovery", meta = (ClampMin = "0.1"))
+	float CanopyLeanResponse = 2.5f;
+
+	/** Peak extra tilt (deg) the canopy flutters by in the airflow, at FlutterReferenceSpeed. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Recovery", meta = (ClampMin = "0.0"))
+	float CanopyFlutterDeg = 6.0f;
+
+	/** Airspeed (ft/s) at which flutter and breathing reach full strength. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Recovery", meta = (ClampMin = "1.0"))
+	float FlutterReferenceSpeedFps = 70.0f;
+
+	/** How much the canopy "breathes" (radius pulsing) under load, as a fraction of radius. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Recovery", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+	float CanopyBreathAmount = 0.05f;
+
+	/** Extra cable length beyond the straight-line endpoint distance, as a fraction. Gives the
+	 *  shock cord a natural catenary instead of a taut string or a wild loop. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Recovery", meta = (ClampMin = "0.0"))
+	float CableSlackFactor = 0.12f;
+
 	// --- Tethers (simulated cables, so they sag and swing under load) ---
 
 	/** Shock cord from the booster up to the payload bay. */
@@ -215,8 +241,23 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "10.0"))
 	float ShockCordLengthCm = 170.0f;
 
+	/** Tether from the ejected nose section down to the payload bay. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "10.0"))
 	float NoseTetherLengthCm = 130.0f;
+
+	/** How far the payload bay may wander from the main's bridle point once the main is out. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "1.0"))
+	float MainBridleLengthCm = 40.0f;
+
+	/**
+	 * Pendulum swing acceleration (cm/s^2) applied across the airflow to hanging sections.
+	 *
+	 * Distinct from SectionBuffetScale: buffeting is random and reads as shudder, this is a
+	 * coherent oscillation at CanopySwingPeriodSeconds and is what actually makes the train
+	 * look like it is swinging beneath a canopy.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Recovery", meta = (ClampMin = "0.0"))
+	float SectionSwingAccel = 260.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "0.1"))
 	float CableWidthCm = 0.7f;
@@ -247,7 +288,15 @@ public:
 	float SectionLinearDamping = 0.55f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Separation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float SectionAngularDamping = 0.35f;
+	float SectionAngularDamping = 0.9f;
+
+	/** How strongly a settled section swings round to hang along its cord (per second). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Separation", meta = (ClampMin = "0.0"))
+	float SectionAlignStrength = 1.6f;
+
+	/** Buffeting acceleration (cm/s^2) per 100 ft/s of airspeed, shaking sections in the airflow. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Separation", meta = (ClampMin = "0.0"))
+	float SectionBuffetScale = 140.0f;
 
 	// --- Effects ---
 	// Every Niagara slot is OPTIONAL. Leave one unset and the code-built fallback below is used
@@ -418,6 +467,24 @@ protected:
 
 	// --- Per-frame visual updates ---
 
+	/**
+	 * Read the air-relative velocity from JSBSim into AirflowLocal / AirspeedFps.
+	 *
+	 * JSBSim's velocities/{u,v,w}-aero-fps are the body-frame velocity of the airframe THROUGH
+	 * THE AIR, so they already include wind, gusts and turbulence from the FDM's atmosphere.
+	 * The plugin builds the actor rotation straight from JSBSim's Euler angles, which makes the
+	 * actor frame the body frame with Z flipped (body Z is down, Unreal Z is up) - so the
+	 * mapping to actor-local space is just (u, v, -w), with no georeferencing math needed.
+	 */
+	void SampleAirflow();
+
+	/** Random buffeting acceleration across the airflow, scaled by dynamic pressure. */
+	FVector MakeBuffet(float Scale) const;
+
+	/** Coherent pendulum acceleration across the airflow. PhaseOffset staggers each section so
+	 *  the train swings as a chain rather than moving as one rigid block. */
+	FVector MakeSwing(float Scale, float PhaseOffset) const;
+
 	void UpdateSeparation(float DeltaSeconds);
 	void UpdateCanopies(float DeltaSeconds);
 	void UpdateCables();
@@ -432,11 +499,19 @@ protected:
 
 	// --- Runtime visual state ---
 
-	UPROPERTY(Transient)
-	FRocketSectionMotion BoosterMotion;
+	// The recovery train is a hanging CHAIN, matching the FDM's bridle points: the drogue is
+	// tied to the aft end of the ejected nose section, the payload bay dangles below the nose
+	// on its tether, and the tail hangs below the payload on the shock cord. Each section is
+	// anchored to the one above it, so motion propagates down the stack.
 
 	UPROPERTY(Transient)
 	FRocketSectionMotion NoseMotion;
+
+	UPROPERTY(Transient)
+	FRocketSectionMotion UpperMotion;
+
+	UPROPERTY(Transient)
+	FRocketSectionMotion BoosterMotion;
 
 	/** Inflation fraction per canopy, 0 = packed, 1 = fully open (may exceed 1 on opening shock). */
 	float DrogueInflation = 0.0f;
@@ -457,6 +532,23 @@ protected:
 	/** Per-puff spawn time (world seconds), parallel to the instance array. -1 = unused. */
 	TArray<float> SmokePuffSpawnTimes;
 	TArray<FVector> SmokePuffWorldLocations;
+
+	/**
+	 * Air-relative velocity in actor-local space, normalized. Points the way the airframe is
+	 * moving through the air, so -AirflowLocal is where a canopy sits and +AirflowLocal is
+	 * where tethered sections trail. Falls back to -X (body aft) when airspeed is negligible.
+	 */
+	FVector AirflowLocal = -FVector::XAxisVector;
+
+	/** Magnitude of the air-relative velocity, ft/s. */
+	float AirspeedFps = 0.0f;
+
+	/** Ensures the airflow-availability message is logged once per run, not once per frame. */
+	bool bLoggedAirflowStatus = false;
+
+	/** Smoothed canopy axis (actor-local), so the chute leans rather than snapping. */
+	FVector DrogueAxis = FVector::XAxisVector;
+	FVector MainAxis = FVector::XAxisVector;
 
 	/** Tracks separation edges so impulses fire exactly once per event. */
 	bool bWasSeparated = false;
