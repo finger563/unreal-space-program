@@ -58,6 +58,16 @@ void URocketFlightController::TickComponent(float DeltaTime, ELevelTick TickType
 
 	UpdateTelemetry();
 
+	// Drive the atmosphere every frame: UpdateTelemetry() has just refreshed AltitudeAGLFt, so
+	// the altitude-scaled wind here uses this frame's altitude. Turbulence type is configured
+	// lazily the first time through.
+	if (!bTurbulenceConfigured)
+	{
+		ConfigureTurbulence();
+		bTurbulenceConfigured = true;
+	}
+	ApplyWind();
+
 	// --- Auto ignition ---
 	// Wait for the countdown AND for the rocket to be settled on the pad. Igniting while the
 	// vehicle is still falling/bouncing (bad placement, ground raycast issues) would cascade
@@ -243,6 +253,78 @@ void URocketFlightController::SetChuteAreaProperty(const FString& PropertyPath, 
 	Move->CommandConsole(PropertyPath, FString::SanitizeFloat(AreaSqFt), OutValue);
 }
 
+void URocketFlightController::ConfigureTurbulence()
+{
+	UJSBSimMovementComponent* Move = GetMovement();
+	if (!Move)
+	{
+		return;
+	}
+
+	// Culp (turb-type 2) is a bounded, gentle turbulence model driven by gain + rate - a good
+	// fit for "light gusts" without the large excursions the standard model can produce. When
+	// wind is disabled, or turbulence is set to zero, fall back to type 0 (none) so the sim is
+	// perfectly calm rather than running a zero-gain model.
+	const bool bActive = bEnableWind && TurbulenceIntensity > 0.0f;
+
+	TArray<FString> Props = {
+		TEXT("atmosphere/turb-type"),
+		TEXT("atmosphere/turb-gain"),
+		TEXT("atmosphere/turb-rate"),
+		TEXT("atmosphere/turb-rhythmicity")
+	};
+	TArray<FString> Values = {
+		bActive ? TEXT("2") : TEXT("0"),
+		FString::SanitizeFloat(bActive ? TurbulenceIntensity : 0.0f),
+		FString::SanitizeFloat(bActive ? 1.5f : 0.0f),
+		FString::SanitizeFloat(bActive ? 0.1f : 0.0f)
+	};
+	TArray<FString> Out;
+	Move->CommandConsoleBatch(Props, Values, Out);
+}
+
+void URocketFlightController::ApplyWind()
+{
+	UJSBSimMovementComponent* Move = GetMovement();
+	if (!Move)
+	{
+		return;
+	}
+
+	float WindNorthFps = 0.0f;
+	float WindEastFps = 0.0f;
+
+	if (bEnableWind)
+	{
+		// Altitude profile: power law anchored at WindReferenceAltitudeFt, floored so the
+		// surface wind never fully dies. Uses AGL so the profile is relative to the launch site.
+		const float Ratio = FMath::Max(AltitudeAGLFt, 0.0f) / FMath::Max(WindReferenceAltitudeFt, 1.0f);
+		const float Profile = FMath::Max(FMath::Pow(Ratio, WindShearExponent), WindSurfaceFraction);
+		const float SpeedKts = WindSpeedKts * Profile;
+
+		// Knots -> ft/s. Heading is the direction the wind blows FROM, so the velocity vector
+		// points the opposite way: a wind from the west (270) has a positive eastward velocity.
+		const float SpeedFps = SpeedKts * 1.68781f;
+		const float FromRad = FMath::DegreesToRadians(WindHeadingDeg);
+		WindNorthFps = -SpeedFps * FMath::Cos(FromRad);
+		WindEastFps = -SpeedFps * FMath::Sin(FromRad);
+	}
+
+	// JSBSim's steady wind vector in NED (down component left at 0 - no vertical wind modelled).
+	TArray<FString> Props = {
+		TEXT("atmosphere/wind-north-fps"),
+		TEXT("atmosphere/wind-east-fps"),
+		TEXT("atmosphere/wind-down-fps")
+	};
+	TArray<FString> Values = {
+		FString::SanitizeFloat(WindNorthFps),
+		FString::SanitizeFloat(WindEastFps),
+		TEXT("0")
+	};
+	TArray<FString> Out;
+	Move->CommandConsoleBatch(Props, Values, Out);
+}
+
 void URocketFlightController::SetDrogueDragArea(float AreaSqFt)
 {
 	SetChuteAreaProperty(TEXT("external_reactions/drogue_chute/drag_area"), AreaSqFt);
@@ -316,6 +398,8 @@ void URocketFlightController::ResetFlight()
 	IgnitionAltitudeAGLFt = 0.0f;
 	TelemetryLogAccumulator = 0.0f;
 	bWarnedWaitingForSettle = false;
+	// Force turbulence to be reconfigured next tick, in case the settings changed between runs.
+	bTurbulenceConfigured = false;
 
 	ShutdownMotor();
 	SetDrogueDragArea(0.0f);

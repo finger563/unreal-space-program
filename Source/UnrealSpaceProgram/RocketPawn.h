@@ -174,6 +174,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "10.0"))
 	float DrogueLineLengthCm = 90.0f;
 
+	/** Riser / shock cord (cm) from the parachute's confluence point down to the harness where
+	 *  the sections hang. This is the length of cord the train dangles below the canopy - set it
+	 *  to 0 to tie the sections straight to the confluence. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "0.0"))
+	float DrogueRiserLengthCm = 120.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "3"))
 	int32 DrogueGoreCount = 6;
 
@@ -182,6 +188,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "10.0"))
 	float MainLineLengthCm = 180.0f;
+
+	/** Riser / shock cord (cm) from the main's confluence point down to the harness. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "0.0"))
+	float MainRiserLengthCm = 160.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Recovery", meta = (ClampMin = "3"))
 	int32 MainGoreCount = 8;
@@ -456,12 +466,14 @@ protected:
 	/** Create (or refresh) the dynamic material instances used to tint the generated meshes. */
 	void ApplySectionMaterials();
 
-	/** Rebuild a canopy's dome + shroud lines at the given inflation fraction (0..1+). */
+	/** Rebuild a canopy's dome + shroud lines + riser at the given inflation fraction (0..1+).
+	 *  RiserLength draws the shock cord from the confluence (origin) down to the harness. */
 	void BuildCanopyGeometry(
 		UProceduralMeshComponent* CanopyMesh,
 		UProceduralMeshComponent* ShroudMesh,
 		float Radius,
 		float LineLength,
+		float RiserLength,
 		int32 GoreCount,
 		float Inflation);
 

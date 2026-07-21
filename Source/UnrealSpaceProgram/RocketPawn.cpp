@@ -422,8 +422,8 @@ void ARocketPawn::BuildAirframeGeometry()
 	}
 
 	// Canopies start packed; UpdateCanopies() rebuilds them as they inflate.
-	BuildCanopyGeometry(DrogueCanopyMesh, DrogueShroudMesh, DrogueCanopyRadiusCm, DrogueLineLengthCm, DrogueGoreCount, 0.0f);
-	BuildCanopyGeometry(MainCanopyMesh, MainShroudMesh, MainCanopyRadiusCm, MainLineLengthCm, MainGoreCount, 0.0f);
+	BuildCanopyGeometry(DrogueCanopyMesh, DrogueShroudMesh, DrogueCanopyRadiusCm, DrogueLineLengthCm, DrogueRiserLengthCm, DrogueGoreCount, 0.0f);
+	BuildCanopyGeometry(MainCanopyMesh, MainShroudMesh, MainCanopyRadiusCm, MainLineLengthCm, MainRiserLengthCm, MainGoreCount, 0.0f);
 	DrogueBuiltInflation = 0.0f;
 	MainBuiltInflation = 0.0f;
 }
@@ -433,6 +433,7 @@ void ARocketPawn::BuildCanopyGeometry(
 	UProceduralMeshComponent* ShroudMesh,
 	float Radius,
 	float LineLength,
+	float RiserLength,
 	int32 GoreCount,
 	float Inflation)
 {
@@ -476,9 +477,9 @@ void ARocketPawn::BuildCanopyGeometry(
 	{
 		FRocketMeshData Shrouds;
 
-		// One line per gore, running from the confluence point at the harness (origin) out to
-		// each skirt attachment. Taut lines, so straight segments are correct here - the slack
-		// tethers between airframe sections are the ones that need real cable simulation.
+		// One line per gore, running from the confluence point (origin) out to each skirt
+		// attachment. Taut lines, so straight segments are correct here - the slack tethers
+		// between airframe sections are the ones that need real cable simulation.
 		for (int32 i = 0; i < GoreCount; i++)
 		{
 			const float Angle = (2.0f * PI * i) / GoreCount;
@@ -488,6 +489,15 @@ void ARocketPawn::BuildCanopyGeometry(
 				CurrentRadius * FMath::Sin(Angle));
 
 			AppendLine(Shrouds, FVector::ZeroVector, SkirtPoint, CableWidthCm * 0.6f);
+		}
+
+		// The riser / shock cord: a single heavier line from the confluence (origin) DOWN to the
+		// harness where the sections hang. -X is toward the load, since the canopy axis is +X.
+		// This is what holds the train a cord's length below the parachute rather than right at
+		// its base. Drawn thicker than the shroud lines because it is the load-bearing cord.
+		if (RiserLength > 0.0f)
+		{
+			AppendLine(Shrouds, FVector::ZeroVector, FVector(-RiserLength, 0.0f, 0.0f), CableWidthCm * 1.2f);
 		}
 
 		ShroudMesh->ClearAllMeshSections();
@@ -1011,31 +1021,34 @@ void ARocketPawn::UpdateSeparation(float DeltaSeconds)
 
 void ARocketPawn::UpdateCanopyAnchors()
 {
-	// A chute's shroud lines do not tie to a section - they converge on the MIDPOINT of the
-	// shock cord running between two sections. The drogue rides the cord between the nose
-	// section and the payload bay; the main rides the cord between the payload bay and the
-	// tail. Both ends move independently, so the confluence is recomputed every frame.
+	// Each parachute floats a RISER (shock cord) length ABOVE the section it is bridled to, so
+	// that section hangs a cord's length BELOW the parachute base rather than right at it. The
+	// riser is pinned to the actual bridle point and tracks it every frame:
+	//
+	//   drogue -> the nose section's aft end (its bridle; the nose hangs tip-down below it)
+	//   main   -> the payload/tail joint     (the main's bridle; payload + tail hang below)
+	//
+	// The riser itself is drawn as a line in BuildCanopyGeometry, from the confluence (origin)
+	// down to the bridle point (-X * Riser in canopy-local, which is exactly the point below).
+	//
+	// DrogueAxis / MainAxis hold last frame's smoothed orientation (set at the end of
+	// UpdateCanopies); one frame of lag on the riser direction is invisible, and it avoids a
+	// chicken-and-egg with the rotation set just afterwards.
 	//
 	// Note this is a visual refinement only: the FDM still applies each chute's drag at the
-	// section joint it is bridled near (rocket.xml external_reactions), which differs from the
-	// cord midpoint by half a cord length.
-	auto Midpoint = [](USceneComponent* A, const FVector& AOffset, USceneComponent* B, const FVector& BOffset)
+	// section joint it is bridled near (rocket.xml external_reactions).
+	if (DrogueCanopyRoot && NoseRoot)
 	{
-		const FVector PA = A->GetComponentTransform().TransformPosition(AOffset);
-		const FVector PB = B->GetComponentTransform().TransformPosition(BOffset);
-		return (PA + PB) * 0.5f;
-	};
-
-	if (DrogueCanopyRoot && NoseRoot && UpperRoot)
-	{
-		DrogueCanopyRoot->SetWorldLocation(
-			Midpoint(NoseRoot, FVector::ZeroVector, UpperRoot, FVector(UpperLengthCm, 0.0f, 0.0f)));
+		const FVector Bridle = NoseRoot->GetComponentLocation(); // nose aft end
+		const FVector WorldAxis = GetActorTransform().TransformVectorNoScale(DrogueAxis).GetSafeNormal();
+		DrogueCanopyRoot->SetWorldLocation(Bridle + WorldAxis * DrogueRiserLengthCm);
 	}
 
-	if (MainCanopyRoot && UpperRoot && BoosterRoot)
+	if (MainCanopyRoot && UpperRoot)
 	{
-		MainCanopyRoot->SetWorldLocation(
-			Midpoint(UpperRoot, FVector::ZeroVector, BoosterRoot, FVector(BoosterLengthCm, 0.0f, 0.0f)));
+		const FVector Bridle = UpperRoot->GetComponentLocation(); // payload aft = tail fore joint
+		const FVector WorldAxis = GetActorTransform().TransformVectorNoScale(MainAxis).GetSafeNormal();
+		MainCanopyRoot->SetWorldLocation(Bridle + WorldAxis * MainRiserLengthCm);
 	}
 }
 
@@ -1059,6 +1072,7 @@ void ARocketPawn::UpdateCanopies(float DeltaSeconds)
 		bool bDeployed,
 		float Radius,
 		float LineLength,
+		float RiserLength,
 		int32 GoreCount,
 		float& Inflation,
 		float& BuiltInflation,
@@ -1103,7 +1117,7 @@ void ARocketPawn::UpdateCanopies(float DeltaSeconds)
 		// Rebuilding the mesh is not free, so only regenerate when the shape has actually moved.
 		if (FMath::Abs(Inflation - BuiltInflation) > 0.02f)
 		{
-			BuildCanopyGeometry(CanopyMesh, ShroudMesh, Radius, LineLength, GoreCount, Inflation);
+			BuildCanopyGeometry(CanopyMesh, ShroudMesh, Radius, LineLength, RiserLength, GoreCount, Inflation);
 			BuiltInflation = Inflation;
 		}
 
@@ -1167,11 +1181,11 @@ void ARocketPawn::UpdateCanopies(float DeltaSeconds)
 	};
 
 	Update(DrogueCanopyRoot, DrogueCanopyMesh, DrogueShroudMesh, FlightController->bDrogueDeployed,
-		DrogueCanopyRadiusCm, DrogueLineLengthCm, DrogueGoreCount,
+		DrogueCanopyRadiusCm, DrogueLineLengthCm, DrogueRiserLengthCm, DrogueGoreCount,
 		DrogueInflation, DrogueBuiltInflation, DrogueDeployTime, DrogueAxis);
 
 	Update(MainCanopyRoot, MainCanopyMesh, MainShroudMesh, FlightController->bMainDeployed,
-		MainCanopyRadiusCm, MainLineLengthCm, MainGoreCount,
+		MainCanopyRadiusCm, MainLineLengthCm, MainRiserLengthCm, MainGoreCount,
 		MainInflation, MainBuiltInflation, MainDeployTime, MainAxis);
 }
 

@@ -98,6 +98,49 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Recovery", meta = (ClampMin = "0.0"))
 	float MainDeployAltitudeAGLFt = 500.0f;
 
+	// ---------------------------------------------------------------------------------------
+	// Wind & turbulence
+	// ---------------------------------------------------------------------------------------
+	// Applied to JSBSim's atmosphere every tick via the property interface. IMPORTANT: the
+	// plugin's own per-frame wind path (UJSBSimMovementComponent::CopyToJSBSim) is commented
+	// out, and its WindIntensityKts is initial-condition only - so without this, the sim runs
+	// in dead-calm air regardless of any wind setting. Driving the atmosphere/wind-*-fps
+	// properties here is what actually blows the rocket, on both ascent and descent, and it
+	// flows into the airflow the recovery visuals read (ARocketPawn::SampleAirflow).
+
+	/** Master switch. When false, wind and turbulence are explicitly zeroed in the FDM. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind")
+	bool bEnableWind = true;
+
+	/** Steady wind speed (knots) AT the reference altitude below. The altitude profile scales
+	 *  this up higher and down lower. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0"))
+	float WindSpeedKts = 12.0f;
+
+	/** Compass heading (deg) the wind blows FROM - meteorological convention. 270 = a westerly
+	 *  (out of the west, pushing the rocket east). 0 = N, 90 = E, 180 = S, 270 = W. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0", ClampMax = "360.0"))
+	float WindHeadingDeg = 270.0f;
+
+	/** Altitude AGL (ft) at which WindSpeedKts applies. The power-law profile is anchored here. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "1.0"))
+	float WindReferenceAltitudeFt = 1000.0f;
+
+	/** Wind-shear exponent for the altitude profile: speed = WindSpeedKts * (AGL/ref)^exponent.
+	 *  0 = uniform wind at all altitudes; ~0.14 is typical open terrain; higher = more shear. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WindShearExponent = 0.14f;
+
+	/** Floor on the altitude profile so the surface wind never drops to zero, as a fraction of
+	 *  WindSpeedKts. Also the wind the rocket feels on the pad. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WindSurfaceFraction = 0.25f;
+
+	/** Turbulence intensity, 0 = calm, 1 = strong gusts. Layered on top of the steady wind via
+	 *  JSBSim's Culp turbulence model. ~0.2 reads as a light, gusty breeze. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float TurbulenceIntensity = 0.2f;
+
 	// --- Detection thresholds (sensible defaults; rarely need changing) ---
 
 	/** In Auto mode, ignition waits until the rocket is settled on the pad (|vertical speed|
@@ -292,6 +335,17 @@ private:
 
 	/** Push a drag area value to a JSBSim external_reactions parachute property. */
 	void SetChuteAreaProperty(const FString& PropertyPath, float AreaSqFt);
+
+	/** Configure JSBSim's turbulence model from TurbulenceIntensity. Called once, and whenever
+	 *  wind is (re)initialized, since the turbulence TYPE only needs setting on change. */
+	void ConfigureTurbulence();
+
+	/** Push the steady wind vector for the current altitude into the FDM. Called every tick so
+	 *  the altitude profile tracks the climb and descent. */
+	void ApplyWind();
+
+	/** True once turbulence has been configured this run (reset by ResetFlight). */
+	bool bTurbulenceConfigured = false;
 
 	void SetPhase(ERocketFlightPhase NewPhase);
 	void UpdateTelemetry();
