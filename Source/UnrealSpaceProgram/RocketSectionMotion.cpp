@@ -60,6 +60,21 @@ void FRocketSectionMotion::Integrate(float DeltaSeconds, const FRocketSectionFor
 
 	Position += Velocity * DeltaSeconds;
 
+	// Hard backstop on the cord. The spring above is soft by design (it produces the swing and
+	// the snap), but a strong gust or swing can overwhelm it - measured overshoots past 60% of
+	// the cord length - and since the cable's rendered length tracks its endpoint distance,
+	// that shows up as a visibly over-stretched tether. A cord physically cannot exceed its
+	// length, so clamp it outright.
+	if (Forces.CordLength > 0.0f)
+	{
+		const FVector Offset = Position - Forces.Anchor;
+		const float Stretch = Offset.Size();
+		if (Stretch > Forces.CordLength && Stretch > KINDA_SMALL_NUMBER)
+		{
+			Position = Forces.Anchor + Offset * (Forces.CordLength / Stretch);
+		}
+	}
+
 	Rotation += FRotator(
 		AngularVelocity.Y * DeltaSeconds,
 		AngularVelocity.Z * DeltaSeconds,

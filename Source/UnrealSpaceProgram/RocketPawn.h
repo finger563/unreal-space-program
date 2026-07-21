@@ -486,6 +486,10 @@ protected:
 	FVector MakeSwing(float Scale, float PhaseOffset) const;
 
 	void UpdateSeparation(float DeltaSeconds);
+
+	/** Park each canopy's confluence on the midpoint of the shock cord it is bridled to. */
+	void UpdateCanopyAnchors();
+
 	void UpdateCanopies(float DeltaSeconds);
 	void UpdateCables();
 	void UpdateExhaust(float DeltaSeconds);

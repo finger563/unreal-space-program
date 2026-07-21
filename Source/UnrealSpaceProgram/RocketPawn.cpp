@@ -565,13 +565,16 @@ void ARocketPawn::BeginPlay()
 	// and swinging under a chute, the default settings let the rope lag behind its endpoints and
 	// whip. Substepping plus extra solver iterations keeps it stable, and a reduced gravity
 	// scale stops it sagging into a huge loop at speed.
-	auto TuneCable = [this](UCableComponent* Cable, USceneComponent* EndComponent, const FVector& EndOffset, float Length)
+	auto TuneCable = [this](UCableComponent* Cable, const FVector& StartOffset, USceneComponent* EndComponent, const FVector& EndOffset, float Length)
 	{
 		if (!Cable || !EndComponent)
 		{
 			return;
 		}
 
+		// The cable's own location is its START point, so it has to sit on the correct end of
+		// the section it is parented to.
+		Cable->SetRelativeLocation(StartOffset);
 		Cable->SetAttachEndToComponent(EndComponent, NAME_None);
 		Cable->EndLocation = EndOffset;
 		Cable->CableLength = Length;
@@ -584,8 +587,12 @@ void ARocketPawn::BeginPlay()
 		Cable->CableGravityScale = 0.25f;
 	};
 
-	TuneCable(ShockCord, BoosterRoot, FVector(BoosterLengthCm * 0.9f, 0.0f, 0.0f), ShockCordLengthCm);
-	TuneCable(NoseTether, NoseRoot, FVector::ZeroVector, NoseTetherLengthCm);
+	// Both cords span a section JOINT to a section JOINT: the shock cord from the payload bay's
+	// aft face to the tail's fore face, the nose tether from the payload bay's fore face to the
+	// nose section's aft face. Starting the nose tether at UpperRoot's own origin would run it
+	// from the BOTTOM of the payload bay, straight through the bay itself.
+	TuneCable(ShockCord, FVector::ZeroVector, BoosterRoot, FVector(BoosterLengthCm, 0.0f, 0.0f), ShockCordLengthCm);
+	TuneCable(NoseTether, FVector(UpperLengthCm, 0.0f, 0.0f), NoseRoot, FVector::ZeroVector, NoseTetherLengthCm);
 
 	// Assign any Niagara overrides. Slots left unset keep the code-built fallbacks.
 	if (ExhaustFX && ExhaustEffect)
@@ -866,7 +873,14 @@ void ARocketPawn::UpdateSeparation(float DeltaSeconds)
 			// roughly full tether extension above the stack. Anchoring to a short bridle at its
 			// own stowed spot instead would leave it only ~35 cm clear - and since it hangs
 			// tip-down and is 62 cm long, its tip would end up inside the payload bay.
-			Forces.Anchor = UpperMotion.Position;
+			//
+			// The tether lands on the payload's FORE face, which sits on a UpperLengthCm arm
+			// from that section's origin - so it swings as the payload rotates. Folding that arm
+			// into the anchor is what keeps the cord honest: constraining the origins alone lets
+			// the real attachment points separate by up to an extra arm length (measured 193 cm
+			// on a 130 cm tether) and renders as a badly over-stretched cord.
+			const FVector BayArm(UpperLengthCm, 0.0f, 0.0f);
+			Forces.Anchor = UpperMotion.Position + UpperMotion.Rotation.RotateVector(BayArm) - BayArm;
 			Forces.CordLength = NoseTetherLengthCm;
 			Forces.SettleDir = AirflowLocal;
 			// While the DROGUE is carrying the train the nose is being LIFTED, not falling, so
@@ -995,12 +1009,45 @@ void ARocketPawn::UpdateSeparation(float DeltaSeconds)
 // Canopies
 // ---------------------------------------------------------------------------------------------
 
+void ARocketPawn::UpdateCanopyAnchors()
+{
+	// A chute's shroud lines do not tie to a section - they converge on the MIDPOINT of the
+	// shock cord running between two sections. The drogue rides the cord between the nose
+	// section and the payload bay; the main rides the cord between the payload bay and the
+	// tail. Both ends move independently, so the confluence is recomputed every frame.
+	//
+	// Note this is a visual refinement only: the FDM still applies each chute's drag at the
+	// section joint it is bridled near (rocket.xml external_reactions), which differs from the
+	// cord midpoint by half a cord length.
+	auto Midpoint = [](USceneComponent* A, const FVector& AOffset, USceneComponent* B, const FVector& BOffset)
+	{
+		const FVector PA = A->GetComponentTransform().TransformPosition(AOffset);
+		const FVector PB = B->GetComponentTransform().TransformPosition(BOffset);
+		return (PA + PB) * 0.5f;
+	};
+
+	if (DrogueCanopyRoot && NoseRoot && UpperRoot)
+	{
+		DrogueCanopyRoot->SetWorldLocation(
+			Midpoint(NoseRoot, FVector::ZeroVector, UpperRoot, FVector(UpperLengthCm, 0.0f, 0.0f)));
+	}
+
+	if (MainCanopyRoot && UpperRoot && BoosterRoot)
+	{
+		MainCanopyRoot->SetWorldLocation(
+			Midpoint(UpperRoot, FVector::ZeroVector, BoosterRoot, FVector(BoosterLengthCm, 0.0f, 0.0f)));
+	}
+}
+
 void ARocketPawn::UpdateCanopies(float DeltaSeconds)
 {
 	if (!FlightController)
 	{
 		return;
 	}
+
+	// Sections have already moved this frame, so the confluence points are current.
+	UpdateCanopyAnchors();
 
 	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 
@@ -1164,7 +1211,7 @@ void ARocketPawn::UpdateCables()
 	// Cables only exist once the pieces they connect have actually come apart. The shock cord
 	// runs payload -> tail, and those two stay bolted together until the main deploys between
 	// them, so it appears at main deploy rather than at apogee.
-	UpdateCable(ShockCord, BoosterRoot, FVector(BoosterLengthCm * 0.9f, 0.0f, 0.0f),
+	UpdateCable(ShockCord, BoosterRoot, FVector(BoosterLengthCm, 0.0f, 0.0f),
 		ShockCordLengthCm * (1.0f + CableSlackFactor), FlightController->bMainDeployed);
 
 	// The nose section leaves at apogee now, not at main deploy, so its tether to the payload
