@@ -172,15 +172,19 @@ namespace
 			{
 				const int32 A = CenterIndex + 1 + Col;
 				Out.Triangles.Add(CenterIndex);
+				// Unreal is left-handed and treats CLOCKWISE triangles as front-facing (matching
+				// the tube-wall winding above, which the analytic normals confirm). The cap
+				// winding must therefore be the reverse of the "obvious" fan order, or every cap
+				// renders back-faced and looks like a hole.
 				if (bFacingFore)
 				{
-					Out.Triangles.Add(A);
 					Out.Triangles.Add(A + 1);
+					Out.Triangles.Add(A);
 				}
 				else
 				{
-					Out.Triangles.Add(A + 1);
 					Out.Triangles.Add(A);
+					Out.Triangles.Add(A + 1);
 				}
 			}
 		};
@@ -495,6 +499,41 @@ void RocketGeometry::BuildGoredCanopy(
 	{
 		const FVector Normal = Accumulated[i].GetSafeNormal();
 		Out.Normals[FirstVertex + i] = Normal.IsNearlyZero() ? FVector::XAxisVector : Normal;
+	}
+
+	// --- Double-side the canopy ---
+	// A real parachute is seen from both above and below, but the engine's BasicShapeMaterial is
+	// single-sided and a MID cannot flip that. So rather than depend on a two-sided material we
+	// can't author, mirror the surface: a second copy of every vertex with a flipped normal, and
+	// the triangles wound the other way. Cheap (the canopy is ~450 verts) and always correct.
+	const int32 BackFirst = Out.Vertices.Num();
+	for (int32 i = 0; i < VertexCount; i++)
+	{
+		const FVector Pos = Out.Vertices[FirstVertex + i];
+		const FVector Nrm = Out.Normals[FirstVertex + i];
+		const FVector2D UV = Out.UVs[FirstVertex + i];
+		Out.Vertices.Add(Pos);
+		Out.Normals.Add(-Nrm);
+		Out.UVs.Add(UV);
+		Out.Tangents.Add(FProcMeshTangent(FVector::YAxisVector, false));
+	}
+
+	for (int32 Ring = 0; Ring < RadialSegments; Ring++)
+	{
+		for (int32 Col = 0; Col < RadialColumns; Col++)
+		{
+			const int32 A = BackFirst + Ring * Columns + Col;
+			const int32 B = A + Columns;
+
+			// Reverse of the front winding, so the back faces point the other way.
+			Out.Triangles.Add(A);
+			Out.Triangles.Add(A + 1);
+			Out.Triangles.Add(B);
+
+			Out.Triangles.Add(A + 1);
+			Out.Triangles.Add(B + 1);
+			Out.Triangles.Add(B);
+		}
 	}
 }
 

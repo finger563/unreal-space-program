@@ -308,6 +308,75 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Separation", meta = (ClampMin = "0.0"))
 	float SectionBuffetScale = 140.0f;
 
+	// --- Launch rail + pad ---
+	// A pad plate and a guide rail are generated at the launch site and left in the world while
+	// the rocket flies. Until the rocket has travelled the rail's length, its attitude and its
+	// off-rail (lateral) position are locked to the rail, so it starts at rest on the pad and
+	// flies straight up the rail before aerodynamics take over - exactly like a real rail launch.
+
+	/** Master switch for the launch rail (visual + the fly-straight constraint). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Rail")
+	bool bUseLaunchRail = true;
+
+	/** Rail length in cm. Leave at 0 to auto-size to RailLengthMultiple x the rocket length. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Rail", meta = (ClampMin = "0.0"))
+	float RailLengthCm = 0.0f;
+
+	/** Auto rail length as a multiple of the rocket length, used when RailLengthCm is 0. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Rail", meta = (ClampMin = "0.5"))
+	float RailLengthMultiple = 1.5f;
+
+	/** How far off the body centreline the rail sits (cm). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rocket|Rail", meta = (ClampMin = "0.0"))
+	float RailStandoffCm = 12.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Rail")
+	FLinearColor RailColor = FLinearColor(0.20f, 0.20f, 0.22f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Rail")
+	FLinearColor PadColor = FLinearColor(0.08f, 0.08f, 0.09f);
+
+	/** The launch pad plate (generated, left in the world at the launch site). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rocket|Rail")
+	TObjectPtr<UProceduralMeshComponent> PadMesh;
+
+	/** The guide rail (generated, left in the world at the launch site). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rocket|Rail")
+	TObjectPtr<UProceduralMeshComponent> RailMesh;
+
+	/** True once the rocket has cleared the rail and flies free. */
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|Rail")
+	bool bOffRail = false;
+
+	/** Effective rail length in cm (RailLengthCm, or the auto multiple of body length). */
+	UFUNCTION(BlueprintPure, Category = "Rocket|Rail")
+	float GetRailLengthCm() const;
+
+	// --- Wind arrow (a 3D world-space vector showing wind direction + strength) ---
+
+	/** Show the world-space wind arrow that floats near the rocket. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Wind")
+	bool bShowWindArrow = true;
+
+	/** Height (m) the arrow floats above the rocket. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Wind")
+	float WindArrowHeightM = 6.0f;
+
+	/** Arrow length (cm) per knot of wind. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Wind", meta = (ClampMin = "0.0"))
+	float WindArrowCmPerKt = 14.0f;
+
+	/** Clamp on the arrow's drawn length (cm), so a strong wind doesn't produce a huge arrow. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Wind", meta = (ClampMin = "10.0"))
+	float WindArrowMaxLengthCm = 400.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rocket|Wind")
+	FLinearColor WindArrowColor = FLinearColor(0.15f, 0.6f, 1.0f);
+
+	/** The generated wind arrow mesh (unit arrow along +X, scaled/oriented each tick). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Rocket|Wind")
+	TObjectPtr<UProceduralMeshComponent> WindArrow;
+
 	// --- Effects ---
 	// Every Niagara slot is OPTIONAL. Leave one unset and the code-built fallback below is used
 	// instead, so the rocket has visible exhaust and smoke with no authored assets at all.
@@ -499,6 +568,20 @@ protected:
 
 	void UpdateSeparation(float DeltaSeconds);
 
+	/** Generate the pad plate + guide rail geometry (once). */
+	void BuildRailAndPadGeometry();
+
+	/** Capture the rail frame (base, axis, attitude) from the rocket's start transform, and
+	 *  park the pad + rail there in world space. */
+	void InitializeRail();
+
+	/** While on the rail, lock the rocket's attitude and off-rail position to the rail; detect
+	 *  and latch rail clearance. Runs after JSBSim has set the transform this frame. */
+	void UpdateRail(float DeltaSeconds);
+
+	/** Orient/scale the wind arrow to the current wind and float it above the rocket. */
+	void UpdateWindArrow(float DeltaSeconds);
+
 	/** Park each canopy's confluence on the midpoint of the shock cord it is bridled to. */
 	void UpdateCanopyAnchors();
 
@@ -565,6 +648,17 @@ protected:
 	/** Smoothed canopy axis (actor-local), so the chute leans rather than snapping. */
 	FVector DrogueAxis = FVector::XAxisVector;
 	FVector MainAxis = FVector::XAxisVector;
+
+	// --- Launch rail runtime state (world frame, captured at first tick) ---
+	bool bRailInitialized = false;
+	FVector RailBaseWorld = FVector::ZeroVector;  // rocket origin at rest on the pad
+	FVector RailAxisWorld = FVector::UpVector;     // unit launch direction (rocket nose dir)
+	FQuat RailRotWorld = FQuat::Identity;          // rocket attitude on the rail
+	float RailStartAlongCm = 0.0f;                 // along-rail coordinate of the start point
+
+	/** Wind arrow material (tinted, emissive-ish). */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> WindArrowMaterial;
 
 	/** Tracks separation edges so impulses fire exactly once per event. */
 	bool bWasSeparated = false;

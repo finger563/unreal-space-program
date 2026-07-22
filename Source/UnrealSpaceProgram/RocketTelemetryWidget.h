@@ -64,6 +64,9 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> RecoveryText;
 
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> WindText;
+
 private:
 	/** Builds the default panel (canvas > border > rows) when no designer tree exists. */
 	void BuildDefaultLayout();

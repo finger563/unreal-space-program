@@ -14,6 +14,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "ProceduralMeshComponent.h"
+#include "GeoReferencingSystem.h"
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -267,6 +268,24 @@ ARocketPawn::ARocketPawn()
 		SmokePuffs->SetStaticMesh(SphereMesh.Object);
 	}
 
+	// --- Launch rail + pad (world-fixed: they stay at the launch site as the rocket flies) ---
+	auto MakeWorldMesh = [this, MakeSectionMesh](const TCHAR* Name) -> UProceduralMeshComponent*
+	{
+		UProceduralMeshComponent* Mesh = MakeSectionMesh(Name, GetRootComponent());
+		Mesh->SetUsingAbsoluteLocation(true);
+		Mesh->SetUsingAbsoluteRotation(true);
+		Mesh->SetUsingAbsoluteScale(true);
+		return Mesh;
+	};
+
+	PadMesh = MakeWorldMesh(TEXT("PadMesh"));
+	RailMesh = MakeWorldMesh(TEXT("RailMesh"));
+
+	// Wind arrow floats near the rocket with a world orientation (independent of rocket tumble).
+	WindArrow = MakeWorldMesh(TEXT("WindArrow"));
+	WindArrow->SetCastShadow(false);
+	WindArrow->SetVisibility(false);
+
 	// --- JSBSim flight dynamics, configured for the rocket ---
 	JSBSim = CreateDefaultSubobject<UJSBSimMovementComponent>(TEXT("JSBSimMovement"));
 	JSBSim->AircraftModel = TEXT("rocket");
@@ -339,6 +358,18 @@ void ARocketPawn::OnConstruction(const FTransform& Transform)
 
 	BuildAirframeGeometry();
 	ApplySectionMaterials();
+
+	// Build the pad + rail geometry here too (not only at BeginPlay) so it is visible in the
+	// editor viewport before PIE, and park it on the actor's placed transform. These use absolute
+	// world transforms, so without an explicit placement they would sit at the world origin.
+	BuildRailAndPadGeometry();
+	if (bUseLaunchRail)
+	{
+		const FVector L = GetActorLocation();
+		const FQuat R = GetActorQuat();
+		if (PadMesh) { PadMesh->SetVisibility(true); PadMesh->SetWorldLocationAndRotation(L, R); }
+		if (RailMesh) { RailMesh->SetVisibility(true); RailMesh->SetWorldLocationAndRotation(L, R); }
+	}
 }
 
 void ARocketPawn::BuildAirframeGeometry()
@@ -358,7 +389,10 @@ void ARocketPawn::BuildAirframeGeometry()
 		}
 
 		FRocketMeshData Tube;
-		RocketGeometry::BuildTube(Tube, BodyRadiusCm, BodyRadiusCm, BoosterLengthCm - TailLength, 24, TailLength <= 0.0f, false);
+		// Cap the fore (top) end too: after separation the booster is seen from every angle, so
+		// it must be a closed solid, not an open pipe. The aft is closed by the boat tail (or the
+		// tube's own aft cap when there is no boat tail).
+		RocketGeometry::BuildTube(Tube, BodyRadiusCm, BodyRadiusCm, BoosterLengthCm - TailLength, 24, TailLength <= 0.0f, true);
 		for (FVector& Vertex : Tube.Vertices)
 		{
 			Vertex.X += TailLength;
@@ -445,8 +479,9 @@ void ARocketPawn::BuildCanopyGeometry(
 	// the opening read as fabric filling with air instead of a balloon growing.
 	const float PackedRadius = Radius * 0.06f;
 	const float CurrentRadius = FMath::Lerp(PackedRadius, Radius, FMath::Min(Inflation, 1.5f));
-	// Deep and narrow when packed, shallow and wide when open.
-	const float CurrentDepth = FMath::Lerp(Radius * 0.5f, Radius * 0.62f, FMath::Min(Inflation, 1.0f));
+	// Deep and narrow when packed, a rounded dome when open. ~0.8x radius reads as a full,
+	// billowing canopy rather than a flat sheet.
+	const float CurrentDepth = FMath::Lerp(Radius * 0.55f, Radius * 0.80f, FMath::Min(Inflation, 1.0f));
 
 	// Lines shorten slightly as the canopy spreads, since the skirt moves outward.
 	const float CurrentLineLength = LineLength * FMath::Lerp(1.0f, 0.94f, FMath::Min(Inflation, 1.0f));
@@ -551,6 +586,241 @@ void ARocketPawn::ApplySectionMaterials()
 	{
 		SmokePuffs->SetMaterial(0, SmokeMaterial);
 	}
+
+	auto TintWorld = [this](UProceduralMeshComponent* Mesh, const FLinearColor& Color)
+	{
+		if (Mesh)
+		{
+			if (UMaterialInstanceDynamic* M = MakeTintedMaterial(this, BasicMaterialPath, Color))
+			{
+				Mesh->SetMaterial(0, M);
+			}
+		}
+	};
+	TintWorld(PadMesh, PadColor);
+	TintWorld(RailMesh, RailColor);
+
+	// Wind arrow: the OPAQUE basic material (same as the pad/rail, which render correctly).
+	// EmissiveMeshMaterial is translucent with an Opacity that defaults to 0, which made the
+	// arrow fully transparent - it was placed, scaled and visible, just invisible.
+	WindArrowMaterial = MakeTintedMaterial(this, BasicMaterialPath, WindArrowColor);
+	if (WindArrow && WindArrowMaterial)
+	{
+		WindArrow->SetMaterial(0, WindArrowMaterial);
+	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// Launch rail + pad
+// ---------------------------------------------------------------------------------------------
+
+float ARocketPawn::GetRailLengthCm() const
+{
+	return RailLengthCm > 0.0f ? RailLengthCm : RailLengthMultiple * GetTotalLengthCm();
+}
+
+void ARocketPawn::BuildRailAndPadGeometry()
+{
+	// Built in the rocket's local convention: +X is up (the launch direction), origin at the
+	// tail / pad plane. InitializeRail() then parks these in world at the launch site.
+
+	// Pad: a short, wide cylinder just below the rocket base - the launch plate.
+	if (PadMesh)
+	{
+		FRocketMeshData Pad;
+		const float PadRadius = FMath::Max(BodyRadiusCm * 4.0f, 40.0f);
+		RocketGeometry::BuildTube(Pad, PadRadius, PadRadius, 5.0f, 20, true, true);
+		for (FVector& V : Pad.Vertices) { V.X -= 6.0f; } // sit just under the tail
+		PadMesh->ClearAllMeshSections();
+		Pad.Apply(PadMesh);
+	}
+
+	// Rail: a square-section beam offset to the side, running up the full rail length. A short
+	// foot ties it to the pad.
+	if (RailMesh)
+	{
+		FRocketMeshData Rail;
+		const float RailLen = GetRailLengthCm();
+		const float Half = 2.5f; // 5 cm square section
+		const float Standoff = BodyRadiusCm + RailStandoffCm;
+
+		FRocketMeshData Beam;
+		RocketGeometry::BuildTube(Beam, Half, Half, RailLen, 4, true, true); // 4-gon = square prism
+		for (FVector& V : Beam.Vertices)
+		{
+			// BuildTube's square sits diamond-on; roll 45 deg so it reads as a flat-faced rail.
+			const float y = V.Y, z = V.Z;
+			V.Y = (y - z) * 0.70710678f;
+			V.Z = (y + z) * 0.70710678f + Standoff;
+		}
+		Rail.Append(Beam);
+
+		// Foot: a small block at the base linking rail to pad.
+		FRocketMeshData Foot;
+		RocketGeometry::BuildTube(Foot, Standoff * 0.5f, Standoff * 0.5f, 6.0f, 4, true, true);
+		for (FVector& V : Foot.Vertices)
+		{
+			V.X -= 3.0f;
+			V.Z += Standoff * 0.5f;
+		}
+		Rail.Append(Foot);
+
+		RailMesh->ClearAllMeshSections();
+		Rail.Apply(RailMesh);
+	}
+
+	// Wind arrow: a unit arrow along +X (shaft + head), 1 cm long, scaled each tick.
+	if (WindArrow)
+	{
+		FRocketMeshData Arrow;
+		FRocketMeshData Shaft;
+		RocketGeometry::BuildTube(Shaft, 0.06f, 0.06f, 0.8f, 10, true, false);
+		Arrow.Append(Shaft);
+
+		FRocketMeshData Head;
+		RocketGeometry::BuildTube(Head, 0.2f, 0.0f, 0.2f, 12, true, false); // cone
+		for (FVector& V : Head.Vertices) { V.X += 0.8f; }
+		Arrow.Append(Head);
+
+		WindArrow->ClearAllMeshSections();
+		Arrow.Apply(WindArrow);
+	}
+}
+
+void ARocketPawn::InitializeRail()
+{
+	// The launch pose is captured in BeginPlay (before JSBSim's first tick), so this is a no-op
+	// kept only for API symmetry.
+}
+
+void ARocketPawn::UpdateRail(float DeltaSeconds)
+{
+	if (!bUseLaunchRail)
+	{
+		bOffRail = true;
+		if (PadMesh) { PadMesh->SetVisibility(false); }
+		if (RailMesh) { RailMesh->SetVisibility(false); }
+		return;
+	}
+
+	if (!bRailInitialized)
+	{
+		return; // BeginPlay hasn't captured the launch pose yet
+	}
+
+	const bool bIgnited = FlightController && FlightController->bMotorIgnited;
+
+	// --- Pre-ignition: HOLD the rocket on the pad. ---
+	// The launch pose was captured in BeginPlay from the editor placement. JSBSim, left alone,
+	// would settle the vehicle from that pose onto its own detected ground (a line trace to the
+	// terrain) - and if that trace sits lower than the placement, or misses and falls back to the
+	// sea-level ellipsoid, the rocket visibly drops. Pinning the actor to the launch pose until
+	// ignition keeps it truly at rest on the pad, and the pad + rail stay with it instead of
+	// falling. (If the rocket is genuinely mis-placed above the ground, the existing auto-ignition
+	// "not settled - check terrain collision" warning still fires, so the problem isn't hidden.)
+	if (!bIgnited)
+	{
+		SetActorLocationAndRotation(RailBaseWorld, RailRotWorld);
+		if (PadMesh) { PadMesh->SetWorldLocationAndRotation(RailBaseWorld, RailRotWorld); }
+		if (RailMesh) { RailMesh->SetWorldLocationAndRotation(RailBaseWorld, RailRotWorld); }
+		return;
+	}
+
+	if (bOffRail)
+	{
+		return;
+	}
+
+	// --- On the rail (ignited): GRADED constraint until it has climbed the rail's length. ---
+	//
+	// A hard attitude lock would snap to whatever JSBSim's free attitude happens to be the
+	// instant we let go - and because JSBSim keeps integrating its own state underneath (we
+	// cannot cheaply write its attitude back), that can be well off vertical, especially with
+	// wind weathercocking or a rough ground contact. So instead of lock-then-release, the
+	// constraint FADES: fully rail-locked at the pad, easing to fully free exactly at the rail
+	// tip. The handoff is continuous by construction - no snap is possible - and near the bottom
+	// the rocket is still guided dead straight up the rail.
+	const FVector P = GetActorLocation();
+	const float Travel = FVector::DotProduct(P - RailBaseWorld, RailAxisWorld);
+	const float RailLen = GetRailLengthCm();
+	const float T = FMath::Clamp(Travel / FMath::Max(RailLen, 1.0f), 0.0f, 1.0f);
+
+	if (T >= 1.0f)
+	{
+		bOffRail = true; // fully free already (weight was ~0 near the tip), so nothing to snap
+		return;
+	}
+
+	// Weight: 1 on the pad, smoothly to 0 at the rail tip.
+	const float W = 1.0f - FMath::SmoothStep(0.0f, 1.0f, T);
+
+	// Attitude eases from JSBSim's actual toward the rail; position eases from JSBSim's actual
+	// toward the on-rail (lateral drift removed).
+	const FQuat BlendedRot = FQuat::Slerp(GetActorQuat(), RailRotWorld, W).GetNormalized();
+	const FVector OnRail = RailBaseWorld + RailAxisWorld * FMath::Max(Travel, 0.0f);
+	const FVector BlendedLoc = FMath::Lerp(P, OnRail, W);
+
+	SetActorLocationAndRotation(BlendedLoc, BlendedRot);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Wind arrow
+// ---------------------------------------------------------------------------------------------
+
+void ARocketPawn::UpdateWindArrow(float DeltaSeconds)
+{
+	if (!WindArrow)
+	{
+		return;
+	}
+
+	const bool bHasWind = bShowWindArrow && FlightController && FlightController->bEnableWind
+		&& FlightController->CurrentWindSpeedKts > 0.05f;
+
+	WindArrow->SetVisibility(bHasWind);
+	if (!bHasWind)
+	{
+		return;
+	}
+
+	// Direction the wind blows TOWARDS, in UE world. The wind is a NED velocity in JSBSim's
+	// frame; the map's North/East axes are a georeferenced rotation of UE X/Y, NOT the identity,
+	// so a naive "compass heading -> UE yaw" is off by whatever the tangent frame is rotated by.
+	// Transform the wind's (North, East) velocity through the SAME georeferencing frame the
+	// physics uses, so the arrow always matches how the rocket actually weathercocks.
+	FVector Dir = FVector::XAxisVector;
+	if (AGeoReferencingSystem* Geo = AGeoReferencingSystem::GetGeoReferencingSystem(this))
+	{
+		FVector East, North, Up;
+		Geo->GetENUVectorsAtEngineLocation(GetActorLocation(), East, North, Up);
+		const FVector WindWorld =
+			North * FlightController->CurrentWindNorthFps + East * FlightController->CurrentWindEastFps;
+		if (!WindWorld.IsNearlyZero())
+		{
+			Dir = WindWorld.GetSafeNormal();
+		}
+	}
+	else
+	{
+		// No georeferencing system (unlikely in this project) - fall back to the flat compass map.
+		Dir = FRotator(0.0f, FlightController->WindHeadingDeg + 180.0f, 0.0f).Vector();
+	}
+
+	// Length scales with the effective wind speed, but never below a floor - a thin 40 cm arrow
+	// 6 m up is invisible from the chase camera, which is why nothing showed before.
+	const float LengthCm = FMath::Clamp(
+		FlightController->CurrentWindSpeedKts * WindArrowCmPerKt,
+		FMath::Min(150.0f, WindArrowMaxLengthCm), WindArrowMaxLengthCm);
+
+	// Thickness is a FIXED world size, not tied to length: the unit arrow's 0.06 shaft radius
+	// scaled by ~90 gives a ~5 cm shaft and ~14 cm head, clearly readable at chase distance.
+	const float ThicknessScale = 90.0f;
+
+	// Float above the rocket so it is always visible; oriented purely in world (independent of
+	// the rocket's attitude), so it reads correctly and swings as the camera orbits.
+	const FVector Location = GetActorLocation() + FVector(0.0f, 0.0f, WindArrowHeightM * 100.0f);
+	WindArrow->SetWorldLocationAndRotation(Location, FRotationMatrix::MakeFromX(Dir).ToQuat());
+	WindArrow->SetWorldScale3D(FVector(LengthCm, ThicknessScale, ThicknessScale));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -590,9 +860,16 @@ void ARocketPawn::BeginPlay()
 		Cable->CableLength = Length;
 		Cable->CableWidth = CableWidthCm;
 
-		Cable->bUseSubstepping = true;
-		Cable->SubstepTime = 0.005f;
-		Cable->SolverIterations = 16;
+		// Substepping is deliberately OFF. UCableComponent's substep loop is an uncapped
+		// `while (accumulatedTime >= SubstepTime) { ... }`, so any single slow frame does many
+		// substeps, which makes the frame slower, which enqueues even more substeps next frame -
+		// an unrecoverable death spiral that presents as an editor/PIE hang. It reliably tripped
+		// at main deploy (a heavy frame: main canopy rebuild, two sections releasing, the cord
+		// going live across a cold gap). These cords are cosmetic, so we simulate once per frame
+		// at frame dt instead - stable and cheap. Solver iterations + stiffness give enough
+		// firmness at frame rate without the risk.
+		Cable->bUseSubstepping = false;
+		Cable->SolverIterations = 12;
 		Cable->bEnableStiffness = true;
 		Cable->CableGravityScale = 0.25f;
 	};
@@ -626,6 +903,27 @@ void ARocketPawn::BeginPlay()
 	SmokePuffSpawnTimes.Init(-1.0f, FMath::Max(MaxSmokePuffs, 0));
 	SmokePuffWorldLocations.Init(FVector::ZeroVector, FMath::Max(MaxSmokePuffs, 0));
 
+	// Generate the pad + rail + wind arrow geometry, and make sure our Tick runs AFTER the
+	// JSBSim movement component's - the rail constraint corrects the transform JSBSim sets, so
+	// it has to see this frame's value, not last frame's.
+	BuildRailAndPadGeometry();
+	if (JSBSim)
+	{
+		AddTickPrerequisiteComponent(JSBSim);
+	}
+
+	// Capture the launch pose from the editor placement, NOW, before JSBSim's first tick moves
+	// the actor. The rocket is held here until ignition (see UpdateRail), so it starts at rest
+	// on the pad instead of settling/falling onto JSBSim's detected ground, and the pad + rail
+	// stay put rather than dropping with it.
+	RailBaseWorld = GetActorLocation();
+	RailRotWorld = GetActorQuat();
+	RailAxisWorld = RailRotWorld.GetAxisX().GetSafeNormal();
+	bRailInitialized = true;
+	bOffRail = false;
+	if (PadMesh) { PadMesh->SetWorldLocationAndRotation(RailBaseWorld, RailRotWorld); }
+	if (RailMesh) { RailMesh->SetWorldLocationAndRotation(RailBaseWorld, RailRotWorld); }
+
 	ResetVisuals();
 }
 
@@ -650,6 +948,11 @@ void ARocketPawn::ResetVisuals()
 	bWasSeparated = false;
 	bWasMainDeployed = false;
 	bWasLanded = false;
+
+	// Re-arm the rail so a ResetFlight puts the rocket back on it. Keep the captured launch pose
+	// (RailBaseWorld/Rot) - ResetFlight returns JSBSim to the same initial conditions, so the
+	// rocket is held on the original pad again.
+	bOffRail = false;
 
 	if (BoosterRoot) { BoosterRoot->SetRelativeLocationAndRotation(FVector::ZeroVector, FRotator::ZeroRotator); }
 	if (UpperRoot)
@@ -685,6 +988,10 @@ void ARocketPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	// Rail constraint first: it corrects the transform JSBSim set this frame, so everything
+	// downstream (camera, airflow, visuals) sees the on-rail position/attitude.
+	UpdateRail(DeltaSeconds);
+
 	if (bUseChaseCamera)
 	{
 		UpdateChaseCamera();
@@ -701,6 +1008,7 @@ void ARocketPawn::Tick(float DeltaSeconds)
 
 	UpdateExhaust(DeltaSeconds);
 	UpdateSmoke(DeltaSeconds);
+	UpdateWindArrow(DeltaSeconds);
 }
 
 // ---------------------------------------------------------------------------------------------

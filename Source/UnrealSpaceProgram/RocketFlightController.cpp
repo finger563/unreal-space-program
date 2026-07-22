@@ -293,6 +293,9 @@ void URocketFlightController::ApplyWind()
 
 	float WindNorthFps = 0.0f;
 	float WindEastFps = 0.0f;
+	CurrentWindSpeedKts = 0.0f;
+	CurrentWindNorthFps = 0.0f;
+	CurrentWindEastFps = 0.0f;
 
 	if (bEnableWind)
 	{
@@ -301,6 +304,7 @@ void URocketFlightController::ApplyWind()
 		const float Ratio = FMath::Max(AltitudeAGLFt, 0.0f) / FMath::Max(WindReferenceAltitudeFt, 1.0f);
 		const float Profile = FMath::Max(FMath::Pow(Ratio, WindShearExponent), WindSurfaceFraction);
 		const float SpeedKts = WindSpeedKts * Profile;
+		CurrentWindSpeedKts = SpeedKts; // published for the HUD / wind arrow
 
 		// Knots -> ft/s. Heading is the direction the wind blows FROM, so the velocity vector
 		// points the opposite way: a wind from the west (270) has a positive eastward velocity.
@@ -308,6 +312,8 @@ void URocketFlightController::ApplyWind()
 		const float FromRad = FMath::DegreesToRadians(WindHeadingDeg);
 		WindNorthFps = -SpeedFps * FMath::Cos(FromRad);
 		WindEastFps = -SpeedFps * FMath::Sin(FromRad);
+		CurrentWindNorthFps = WindNorthFps;
+		CurrentWindEastFps = WindEastFps;
 	}
 
 	// JSBSim's steady wind vector in NED (down component left at 0 - no vertical wind modelled).
@@ -323,6 +329,15 @@ void URocketFlightController::ApplyWind()
 	};
 	TArray<FString> Out;
 	Move->CommandConsoleBatch(Props, Values, Out);
+}
+
+FString URocketFlightController::CompassPoint(float HeadingDeg)
+{
+	static const TCHAR* Points[] = { TEXT("N"), TEXT("NE"), TEXT("E"), TEXT("SE"),
+									 TEXT("S"), TEXT("SW"), TEXT("W"), TEXT("NW") };
+	const float Wrapped = FMath::Fmod(FMath::Fmod(HeadingDeg, 360.0f) + 360.0f, 360.0f);
+	const int32 Index = FMath::RoundToInt(Wrapped / 45.0f) % 8;
+	return Points[Index];
 }
 
 void URocketFlightController::SetDrogueDragArea(float AreaSqFt)

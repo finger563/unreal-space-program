@@ -141,6 +141,24 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float TurbulenceIntensity = 0.2f;
 
+	/** Effective steady wind speed (kt) at the current altitude - the altitude profile applied
+	 *  to WindSpeedKts. Published each tick for the HUD and the world wind arrow. */
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|Wind")
+	float CurrentWindSpeedKts = 0.0f;
+
+	/** The steady wind VELOCITY in the North/East ground plane (ft/s), i.e. the direction the
+	 *  wind blows TOWARDS. Published so the wind arrow can transform it into UE world space via
+	 *  the same georeferencing frame the physics uses, instead of guessing a compass->UE mapping. */
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|Wind")
+	float CurrentWindNorthFps = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|Wind")
+	float CurrentWindEastFps = 0.0f;
+
+	/** A short compass label ("N", "NE", ...) for a heading in degrees. */
+	UFUNCTION(BlueprintPure, Category = "Rocket|Wind")
+	static FString CompassPoint(float HeadingDeg);
+
 	// --- Detection thresholds (sensible defaults; rarely need changing) ---
 
 	/** In Auto mode, ignition waits until the rocket is settled on the pad (|vertical speed|
