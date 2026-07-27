@@ -498,7 +498,12 @@ void RocketGeometry::BuildGoredCanopy(
 	for (int32 i = 0; i < VertexCount; i++)
 	{
 		const FVector Normal = Accumulated[i].GetSafeNormal();
-		Out.Normals[FirstVertex + i] = Normal.IsNearlyZero() ? FVector::XAxisVector : Normal;
+		// NEGATED: the accumulated face normal follows the front winding, which points "outward"
+		// from the dome - but Unreal's clockwise-front-face convention makes that front set the
+		// one seen from BELOW, so its lit normal must face down/inward (the shaded underside),
+		// and the back set (seen from above) then flips to face up/outward toward the sky. Without
+		// this the shading is inverted: dark on top, bright underneath.
+		Out.Normals[FirstVertex + i] = Normal.IsNearlyZero() ? -FVector::XAxisVector : -Normal;
 	}
 
 	// --- Double-side the canopy ---

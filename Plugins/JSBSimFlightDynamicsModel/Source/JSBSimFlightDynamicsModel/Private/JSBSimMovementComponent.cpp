@@ -244,6 +244,26 @@ double UJSBSimMovementComponent::GetAGLevel(const FVector& StartECEFLocation, FV
     GeoReferencingSystem->GeographicToECEF(QueryGeographic, ECEFContactPoint);
     ECEFNormal = Up;
   }
+
+  // Ground-query diagnostic (enable via the movement component's DrawDebug flag). AGL is
+  // vehicle-altitude minus terrain-altitude: this prints both, plus the raw UE Z of the vehicle
+  // query point vs. the ray hit. If impactEngineZ is well ABOVE queryEngineZ, the downward ray
+  // is hitting collision above the vehicle - i.e. the terrain's *collision* sits higher than its
+  // visual surface, or there is overhead collision within AGLThresholdMeters of the start.
+  if (DrawDebug)
+  {
+    static int32 C = 0;
+    if ((C++ % 60) == 0)
+    {
+      FGeographicCoordinates QGeo, IGeo;
+      GeoReferencingSystem->ECEFToGeographic(StartECEFLocation, QGeo);
+      GeoReferencingSystem->ECEFToGeographic(ECEFContactPoint, IGeo);
+      UE_LOG(LogJSBSim, Display, TEXT("AGL: hit=%d  AGL=%.1fft  vehicleAlt=%.2fm terrainAlt=%.2fm  queryEngineZ=%.1f impactEngineZ=%.1f  (ray starts %.1fm above vehicle)"),
+        HitResult.bBlockingHit ? 1 : 0, HAT * METER_TO_FEET,
+        QGeo.Altitude, IGeo.Altitude, StartEngineLocation.Z,
+        HitResult.bBlockingHit ? HitResult.ImpactPoint.Z : 0.0, AGLThresholdMeters);
+    }
+  }
   return HAT;
 }
 
