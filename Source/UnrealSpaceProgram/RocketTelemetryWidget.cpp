@@ -130,6 +130,7 @@ void URocketTelemetryWidget::BuildDefaultLayout()
 	ApogeeText = AddRow(Box, TEXT("Apogee"));
 	ThrustText = AddRow(Box, TEXT("Thrust"));
 	RecoveryText = AddRow(Box, TEXT("Recovery"));
+	WindText = AddRow(Box, TEXT("Wind"));
 }
 
 void URocketTelemetryWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -211,5 +212,21 @@ void URocketTelemetryWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 			TEXT("Drogue %s    Main %s"),
 			FC->bDrogueDeployed ? TEXT("DEPLOYED") : TEXT("stowed"),
 			FC->bMainDeployed ? TEXT("DEPLOYED") : TEXT("stowed"))));
+	}
+
+	if (WindText)
+	{
+		if (FC->bEnableWind && FC->WindSpeedKts > 0.0f)
+		{
+			// Show the effective (altitude-scaled) speed, and the heading the wind blows FROM.
+			WindText->SetText(FText::FromString(FString::Printf(
+				TEXT("%.0f kt from %.0f° (%s)"),
+				FC->CurrentWindSpeedKts, FC->WindHeadingDeg,
+				*URocketFlightController::CompassPoint(FC->WindHeadingDeg))));
+		}
+		else
+		{
+			WindText->SetText(FText::FromString(TEXT("calm")));
+		}
 	}
 }

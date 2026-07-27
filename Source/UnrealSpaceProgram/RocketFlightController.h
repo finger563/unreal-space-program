@@ -98,6 +98,67 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Recovery", meta = (ClampMin = "0.0"))
 	float MainDeployAltitudeAGLFt = 500.0f;
 
+	// ---------------------------------------------------------------------------------------
+	// Wind & turbulence
+	// ---------------------------------------------------------------------------------------
+	// Applied to JSBSim's atmosphere every tick via the property interface. IMPORTANT: the
+	// plugin's own per-frame wind path (UJSBSimMovementComponent::CopyToJSBSim) is commented
+	// out, and its WindIntensityKts is initial-condition only - so without this, the sim runs
+	// in dead-calm air regardless of any wind setting. Driving the atmosphere/wind-*-fps
+	// properties here is what actually blows the rocket, on both ascent and descent, and it
+	// flows into the airflow the recovery visuals read (ARocketPawn::SampleAirflow).
+
+	/** Master switch. When false, wind and turbulence are explicitly zeroed in the FDM. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind")
+	bool bEnableWind = true;
+
+	/** Steady wind speed (knots) AT the reference altitude below. The altitude profile scales
+	 *  this up higher and down lower. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0"))
+	float WindSpeedKts = 12.0f;
+
+	/** Compass heading (deg) the wind blows FROM - meteorological convention. 270 = a westerly
+	 *  (out of the west, pushing the rocket east). 0 = N, 90 = E, 180 = S, 270 = W. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0", ClampMax = "360.0"))
+	float WindHeadingDeg = 270.0f;
+
+	/** Altitude AGL (ft) at which WindSpeedKts applies. The power-law profile is anchored here. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "1.0"))
+	float WindReferenceAltitudeFt = 1000.0f;
+
+	/** Wind-shear exponent for the altitude profile: speed = WindSpeedKts * (AGL/ref)^exponent.
+	 *  0 = uniform wind at all altitudes; ~0.14 is typical open terrain; higher = more shear. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WindShearExponent = 0.14f;
+
+	/** Floor on the altitude profile so the surface wind never drops to zero, as a fraction of
+	 *  WindSpeedKts. Also the wind the rocket feels on the pad. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WindSurfaceFraction = 0.25f;
+
+	/** Turbulence intensity, 0 = calm, 1 = strong gusts. Layered on top of the steady wind via
+	 *  JSBSim's Culp turbulence model. ~0.2 reads as a light, gusty breeze. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Rocket|Wind", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float TurbulenceIntensity = 0.2f;
+
+	/** Effective steady wind speed (kt) at the current altitude - the altitude profile applied
+	 *  to WindSpeedKts. Published each tick for the HUD and the world wind arrow. */
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|Wind")
+	float CurrentWindSpeedKts = 0.0f;
+
+	/** The steady wind VELOCITY in the North/East ground plane (ft/s), i.e. the direction the
+	 *  wind blows TOWARDS. Published so the wind arrow can transform it into UE world space via
+	 *  the same georeferencing frame the physics uses, instead of guessing a compass->UE mapping. */
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|Wind")
+	float CurrentWindNorthFps = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|Wind")
+	float CurrentWindEastFps = 0.0f;
+
+	/** A short compass label ("N", "NE", ...) for a heading in degrees. */
+	UFUNCTION(BlueprintPure, Category = "Rocket|Wind")
+	static FString CompassPoint(float HeadingDeg);
+
 	// --- Detection thresholds (sensible defaults; rarely need changing) ---
 
 	/** In Auto mode, ignition waits until the rocket is settled on the pad (|vertical speed|
@@ -167,6 +228,12 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|State")
 	bool bReachedApogee = false;
+
+	/** True once the airframe has separated into its tethered recovery sections. Happens
+	 *  automatically with drogue deployment, or via SeparateAirframe(). While separated, the
+	 *  fin stability moments in the JSBSim model are disabled (systems/fins-effective = 0). */
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|State")
+	bool bAirframeSeparated = false;
 
 	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Rocket|State")
 	bool bDrogueDeployed = false;
@@ -250,7 +317,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Rocket|Commands")
 	void SetThrottle(float Throttle01);
 
-	/** Deploy the drogue chute now (applies DrogueDragAreaSqFt). */
+	/** Separate the airframe into its tethered recovery sections. Disables the fin stability
+	 *  moments in the FDM (the broken stack no longer weathercocks). Called automatically by
+	 *  DeployDrogue; exposed separately for HIL / manual sequencing. Idempotent. */
+	UFUNCTION(BlueprintCallable, Category = "Rocket|Commands")
+	void SeparateAirframe();
+
+	/** Deploy the drogue chute now (applies DrogueDragAreaSqFt). Separates the airframe first. */
 	UFUNCTION(BlueprintCallable, Category = "Rocket|Commands")
 	void DeployDrogue();
 
@@ -280,6 +353,17 @@ private:
 
 	/** Push a drag area value to a JSBSim external_reactions parachute property. */
 	void SetChuteAreaProperty(const FString& PropertyPath, float AreaSqFt);
+
+	/** Configure JSBSim's turbulence model from TurbulenceIntensity. Called once, and whenever
+	 *  wind is (re)initialized, since the turbulence TYPE only needs setting on change. */
+	void ConfigureTurbulence();
+
+	/** Push the steady wind vector for the current altitude into the FDM. Called every tick so
+	 *  the altitude profile tracks the climb and descent. */
+	void ApplyWind();
+
+	/** True once turbulence has been configured this run (reset by ResetFlight). */
+	bool bTurbulenceConfigured = false;
 
 	void SetPhase(ERocketFlightPhase NewPhase);
 	void UpdateTelemetry();

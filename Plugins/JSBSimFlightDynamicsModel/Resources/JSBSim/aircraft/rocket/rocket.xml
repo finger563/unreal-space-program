@@ -336,6 +336,7 @@
     <function name="aero/moment/Pitch_alpha">
        <description>Pitch moment due to alpha - fin stability at tail location</description>
        <product>
+           <property>systems/fins-effective</property>  <!-- 0 after recovery separation -->
            <property>aero/qbar-psf</property>
            <value>0.08</value>  <!-- Fin area in ft2 -->
            <value>3.34</value>  <!-- Fin arm in ft (distance from CG to fins) -->
@@ -361,6 +362,7 @@
             term was ALWAYS ZERO - the vehicle had no attitude damping at all. Rewritten
             in explicit qbar/V form: M = -C * (qbar/V) * S_fin * arm^2 * q.</description>
        <product>
+           <property>systems/fins-effective</property>  <!-- 0 after recovery separation -->
            <quotient>
              <property>aero/qbar-psf</property>
              <max>
@@ -372,6 +374,30 @@
            <value>11.16</value>  <!-- Fin arm squared, ft2 (3.34^2) -->
            <property>velocities/q-aero-rad_sec</property>
            <value> -15.0 </value>  <!-- damping strength (~0.3 damping ratio at 460 fps) -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Pitch_damp_chute">
+       <description>Riser/canopy damping of pendulum swing while a parachute is deployed.
+            The canopy's drag responds to the swing velocity of the attachment point
+            (arm ~4.8 ft from CG), strongly damping oscillation - the dominant reason a
+            real recovery train settles instead of pendulum-ing forever. Proportional to
+            the deployed drag area, so it is exactly zero until a chute is out.</description>
+       <product>
+           <sum>
+             <property>external_reactions/drogue_chute/drag_area</property>
+             <property>external_reactions/main_chute/drag_area</property>
+           </sum>
+           <quotient>
+             <property>aero/qbar-psf</property>
+             <max>
+               <property>velocities/vt-fps</property>
+               <value> 20.0 </value>
+             </max>
+           </quotient>
+           <value>23.0</value>  <!-- attachment arm squared, ft2 (~4.8 ft nose-to-CG) -->
+           <property>velocities/q-aero-rad_sec</property>
+           <value> -2.0 </value>
        </product>
     </function>
 
@@ -474,6 +500,7 @@
     <function name="aero/moment/Yaw_beta">
        <description>Yaw moment due to beta - fin stability at tail location</description>
        <product>
+           <property>systems/fins-effective</property>  <!-- 0 after recovery separation -->
            <property>aero/qbar-psf</property>
            <value>0.08</value>  <!-- Fin area in ft2 -->
            <value>3.34</value>  <!-- Fin arm in ft (distance from CG to fins) -->
@@ -504,6 +531,7 @@
        <description>Yaw damping from fins - explicit qbar/V form (the reference used
             aero/bi2vel = span/2V, always zero because metrics span = 0; see Pitch_damp).</description>
        <product>
+           <property>systems/fins-effective</property>  <!-- 0 after recovery separation -->
            <quotient>
              <property>aero/qbar-psf</property>
              <max>
@@ -515,6 +543,27 @@
            <value>11.16</value>  <!-- Fin arm squared, ft2 (3.34^2) -->
            <property>velocities/r-aero-rad_sec</property>
            <value> -15.0 </value>  <!-- damping strength -->
+       </product>
+    </function>
+
+    <function name="aero/moment/Yaw_damp_chute">
+       <description>Riser/canopy damping of pendulum swing while a parachute is deployed
+            (see Pitch_damp_chute).</description>
+       <product>
+           <sum>
+             <property>external_reactions/drogue_chute/drag_area</property>
+             <property>external_reactions/main_chute/drag_area</property>
+           </sum>
+           <quotient>
+             <property>aero/qbar-psf</property>
+             <max>
+               <property>velocities/vt-fps</property>
+               <value> 20.0 </value>
+             </max>
+           </quotient>
+           <value>23.0</value>  <!-- attachment arm squared, ft2 -->
+           <property>velocities/r-aero-rad_sec</property>
+           <value> -2.0 </value>
        </product>
     </function>
 
@@ -547,6 +596,12 @@
  <external_reactions>
   <property value="0">external_reactions/drogue_chute/drag_area</property>
   <property value="0">external_reactions/main_chute/drag_area</property>
+  <!-- 1.0 while the airframe is intact; set to 0.0 at recovery separation (done by the
+       flight controller when the drogue deploys). Gates the fin stability/damping moments:
+       once the rocket breaks into tethered sections, the fins no longer stabilize the
+       stack - without this, the fins try to weathercock the stack nose-into-wind while the
+       chutes hold it canopy-up, and the vehicle pendulums violently during descent. -->
+  <property value="1.0">systems/fins-effective</property>
 
   <force name="drogue_chute" frame="WIND">
    <function>
@@ -555,8 +610,11 @@
      <property>external_reactions/drogue_chute/drag_area</property>
     </product>
    </function>
-   <location unit="FT">  <!-- Nose of rocket for drogue -->
-    <x> 0 </x>
+   <location unit="FT">
+    <!-- Aft end of the NOSE SECTION (the piece that is ejected at apogee, which the drogue
+         is bridled to). Structural x runs aft from the nose tip, so this is 24.4" back:
+         (276.9 cm airframe - 215 cm nose/payload joint) / 30.48 = 2.031 ft. -->
+    <x> 2.031 </x>
     <y> 0 </y>
     <z> 0 </z>
    </location>
@@ -574,8 +632,11 @@
      <property>external_reactions/main_chute/drag_area</property>
     </product>
    </function>
-   <location unit="FT">  <!-- Nose of rocket for main chute -->
-    <x> 0 </x>
+   <location unit="FT">
+    <!-- Joint between the PAYLOAD (mid) section and the TAIL section, which is where the main
+         is bridled. 65.7" aft of the nose tip:
+         (276.9 cm airframe - 110 cm payload/tail joint) / 30.48 = 5.476 ft. -->
+    <x> 5.476 </x>
     <y> 0 </y>
     <z> 0 </z>
    </location>
